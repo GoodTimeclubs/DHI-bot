@@ -7,7 +7,9 @@ ENV PYTHONUNBUFFERED=1 \
     DATA_DIR=/app/data
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# pip selbst aktuell halten (schließt die von Docker Scout gemeldeten pip-CVEs)
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY fixtures ./fixtures
