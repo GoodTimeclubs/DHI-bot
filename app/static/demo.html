@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DHI Bot — Testumgebung</title>
+<style>
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+         background: #f4f6f8; color: #21303f; }
+  header { background: #1d3557; color: #fff; padding: 40px 24px; }
+  header h1 { margin: 0 0 6px; font-size: 26px; }
+  header p { margin: 0; opacity: .8; }
+  main { max-width: 760px; margin: 32px auto; padding: 0 24px 80px; }
+  .card { background: #fff; border: 1px solid #e3e7ec; border-radius: 12px;
+          padding: 20px 22px; margin-bottom: 16px; }
+  .card h2 { margin: 0 0 8px; font-size: 17px; }
+  .card p, .card li { font-size: 14px; line-height: 1.55; }
+  code { background: #eef2f6; padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+  .status { font-size: 13px; color: #5a6a7a; }
+  .ok { color: #1d7a3d; font-weight: 600; } .warn { color: #b3691a; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DHI Bot — Testumgebung</h1>
+  <p>Prototyp des Chat-Assistenten für deutsches-hypnoseinstitut.de</p>
+</header>
+<main>
+  <div class="card">
+    <h2>So testest du</h2>
+    <p>Rechts unten schwebt der Chat-Button 💬 — genau so würde das Widget später auf der
+    echten Website eingebunden (eine <code>&lt;script&gt;</code>-Zeile). Stelle Fragen zu
+    Ausbildungen, Inhalten, Terminen oder zur Buchung.</p>
+  </div>
+  <div class="card">
+    <h2>Status</h2>
+    <p class="status" id="status">Lade Status…</p>
+  </div>
+  <div class="card">
+    <h2>Hinweise</h2>
+    <p>Ohne <code>ANTHROPIC_API_KEY</code> in der <code>.env</code> läuft der
+    <b>Mock-Modus</b>: Der Bot zeigt, welche Quellen und Termine er gefunden hätte —
+    so lässt sich die Daten-Pipeline ohne Kosten prüfen. Mit Key antwortet Claude frei
+    formuliert. Der Index wird täglich automatisch neu aufgebaut
+    (<code>CRAWL_HOUR</code>, Standard 3 Uhr).</p>
+  </div>
+</main>
+<script>
+fetch("/api/health").then(r => r.json()).then(h => {
+  document.getElementById("status").innerHTML =
+    (h.mock_mode
+      ? '<span class="warn">Mock-Modus</span> (kein API-Key gesetzt)'
+      : '<span class="ok">Live</span> · Modell: ' + h.model) +
+    " · Abschnitte im Index: <b>" + h.chunks + "</b>" +
+    " · Termine: <b>" + h.termine + "</b>" +
+    (h.termine_fetched_at ? " · Datenstand: " + h.termine_fetched_at : "");
+}).catch(() => document.getElementById("status").textContent = "API nicht erreichbar.");
+</script>
+<script src="/widget.js" defer></script>
+</body>
+</html>
