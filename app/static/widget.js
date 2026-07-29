@@ -2,6 +2,8 @@
  * Einbau auf einer Website:
  *   <script src="https://BOT-DOMAIN/widget.js" data-api="https://BOT-DOMAIN" defer></script>
  * Ohne data-api wird der Origin verwendet, von dem widget.js geladen wurde.
+ * Mobil: Vollbild-Modus mit Schließen-Button, folgt der Bildschirmtastatur
+ * (VisualViewport), 16px-Eingabe gegen iOS-Auto-Zoom, größere Touch-Ziele.
  */
 (() => {
   const scriptEl = document.currentScript;
@@ -22,7 +24,8 @@
   root.innerHTML = `
   <style>
     :host { all: initial; }
-    * { box-sizing: border-box; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    * { box-sizing: border-box; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+        -webkit-tap-highlight-color: transparent; }
     .btn {
       position: fixed; right: 20px; bottom: 20px; z-index: 999999;
       width: 60px; height: 60px; border-radius: 50%; border: none; cursor: pointer;
@@ -37,10 +40,15 @@
       display: none; flex-direction: column; overflow: hidden;
     }
     .panel.open { display: flex; }
-    .head { background: #1d3557; color: #fff; padding: 14px 16px; }
+    .head { background: #1d3557; color: #fff; padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
+    .head .txt { flex: 1; min-width: 0; }
     .head b { font-size: 15px; }
     .head small { display: block; opacity: .75; font-size: 11px; margin-top: 2px; }
-    .msgs { flex: 1; overflow-y: auto; padding: 14px; background: #f4f6f8; position: relative; }
+    .head .x { border: none; background: none; color: #fff; font-size: 18px; line-height: 1; flex: none;
+               cursor: pointer; padding: 8px; margin: -8px -8px -8px 0; opacity: .85; }
+    .head .x:hover { opacity: 1; }
+    .msgs { flex: 1; overflow-y: auto; padding: 14px; background: #f4f6f8; position: relative;
+            overscroll-behavior: contain; }
     .m { max-width: 85%; margin-bottom: 10px; padding: 9px 12px; border-radius: 12px;
          font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
     .m.user { background: #1d3557; color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
@@ -63,12 +71,30 @@
     .typing { display: inline-block; } .typing i { animation: b 1.2s infinite; font-style: normal; }
     .typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
     @keyframes b { 0%,60%,100% { opacity:.25 } 30% { opacity:1 } }
+    /* Touch-Geräte: 16px-Eingabe (verhindert iOS-Auto-Zoom) und größere Tippflächen */
+    @media (pointer: coarse) {
+      .inp textarea { font-size: 16px; }
+      .chip { padding: 9px 13px; font-size: 13px; }
+      .m.bot a.btnlink { padding: 10px 15px; font-size: 13.5px; }
+      .inp button { padding: 0 18px; }
+      .head .x { padding: 12px; margin: -12px -12px -12px 0; }
+    }
+    /* Kleine Screens: Chat als Vollbild */
+    @media (max-width: 540px), (max-height: 540px) and (pointer: coarse) {
+      .panel { top: 0; left: 0; right: 0; bottom: auto; width: 100%; max-width: 100%;
+               height: 100vh; height: 100dvh; max-height: none; border-radius: 0;
+               padding-bottom: env(safe-area-inset-bottom, 0px); }
+      .btn.hidden { display: none; }
+    }
   </style>
   <button class="btn" title="Chat öffnen">💬</button>
   <div class="panel" role="dialog" aria-label="DHI Chat-Assistent">
     <div class="head">
-      <b>DHI-Assistent</b>
-      <small>Beantwortet Fragen zu Ausbildung, Terminen &amp; Buchung</small>
+      <div class="txt">
+        <b>DHI-Assistent</b>
+        <small>Beantwortet Fragen zu Ausbildung, Terminen &amp; Buchung</small>
+      </div>
+      <button class="x" title="Chat schließen" aria-label="Chat schließen">✕</button>
     </div>
     <div class="msgs"></div>
     <div class="chips"></div>
@@ -85,6 +111,23 @@
   const chips = root.querySelector(".chips");
   const ta = root.querySelector("textarea");
   const send = root.querySelector(".inp button");
+  const closeBtn = root.querySelector(".head .x");
+
+  const isTouch = window.matchMedia("(pointer: coarse)").matches;
+  const smallMq = window.matchMedia("(max-width: 540px), (max-height: 540px) and (pointer: coarse)");
+  const vv = window.visualViewport;
+
+  // Auf kleinen Screens folgt das Vollbild-Panel dem sichtbaren Bereich —
+  // sonst verdeckt die Bildschirmtastatur das Eingabefeld.
+  function fitPanel() {
+    if (!vv || !smallMq.matches || !panel.classList.contains("open")) {
+      panel.style.height = ""; panel.style.transform = ""; return;
+    }
+    panel.style.height = vv.height + "px";
+    panel.style.transform = "translateY(" + vv.offsetTop + "px)";
+  }
+  if (vv) { vv.addEventListener("resize", fitPanel); vv.addEventListener("scroll", fitPanel); }
+  if (smallMq.addEventListener) smallMq.addEventListener("change", fitPanel);
 
   const history = [];
   let busy = false;
@@ -169,16 +212,22 @@
     msgs.scrollTop = Math.max(0, wait.offsetTop - 10);
   }
 
-  btn.onclick = () => {
-    panel.classList.toggle("open");
-    if (panel.classList.contains("open") && !msgs.childElementCount) {
+  function setOpen(open) {
+    panel.classList.toggle("open", open);
+    btn.classList.toggle("hidden", open); // im Vollbild läge der Start-Button sonst unterm Panel
+    if (open && !msgs.childElementCount) {
       add("bot", "Schön, dass Sie da sind! Ich bin der digitale Ausbildungsberater des DHI " +
         "und helfe Ihnen gern bei Ausbildungswahl, Terminen, Preisen und Buchung. " +
         "Was möchten Sie wissen?");
       renderChips();
     }
-    if (panel.classList.contains("open")) ta.focus();
-  };
+    // Auf Touch-Geräten nicht automatisch fokussieren — das würde sofort
+    // die Bildschirmtastatur öffnen (und auf iOS in die Seite zoomen).
+    if (open && !isTouch) ta.focus();
+    fitPanel();
+  }
+  btn.onclick = () => setOpen(!panel.classList.contains("open"));
+  closeBtn.onclick = () => setOpen(false);
   send.onclick = submit;
   ta.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
