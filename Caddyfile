@@ -1,0 +1,14 @@
+# ── Caddy Reverse Proxy für den DHI-Bot ──────────────────────────────────────
+#
+# Lokal:      DOMAIN in .env leer lassen → Bot unter http://localhost (ohne TLS).
+# Produktiv:  DOMAIN=bot.example.de in .env setzen (DNS muss auf den Server
+#             zeigen) → Caddy besorgt und erneuert TLS-Zertifikate automatisch
+#             und leitet HTTP auf HTTPS um. Ports 80 + 443 müssen offen sein.
+#
+# X-Forwarded-For wird von Caddy automatisch gesetzt → TRUST_PROXY=1 in .env,
+# damit das Rate-Limit die echte Besucher-IP sieht.
+
+{$DOMAIN:http://localhost} {
+	encode zstd gzip
+	reverse_proxy dhi-bot:8080
+}

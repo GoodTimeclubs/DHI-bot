@@ -2,10 +2,45 @@ services:
   dhi-bot:
     build: .
     container_name: dhi-bot
-    ports:
-      - "8080:8080"
+    # keine ports: — der Bot ist von außen nicht erreichbar,
+    # aller Zugriff läuft über Caddy im Backend-Netz
     env_file:
       - .env
     volumes:
       - ./data:/app/data
+    networks:
+      - backend
     restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: dhi-bot-caddy
+    depends_on:
+      - dhi-bot
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      # DOMAIN kommt aus der .env: leer = lokal (http://localhost),
+      # gesetzt = automatisches HTTPS via Let's Encrypt
+      DOMAIN: ${DOMAIN:-http://localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - backend
+    restart: unless-stopped
+
+networks:
+  # Internes Backend-Netz: dhi-bot veröffentlicht keine Ports — von außen ist
+  # ausschließlich Caddy (80/443) erreichbar; intern erreicht Caddy den Bot
+  # über den Service-Namen (dhi-bot:8080).
+  # Bewusst KEIN `internal: true`: der Bot braucht ausgehendes Internet für
+  # täglichen Crawl + Claude API, Caddy für Let's-Encrypt-Zertifikate.
+  backend:
+
+volumes:
+  caddy_data:
+  caddy_config:
