@@ -37,6 +37,19 @@ def get_termine() -> dict:
         return _cache["termine"] or {}
 
 
+def get_pages() -> list[dict]:
+    """Alle gecrawlten Seiten (für die Preisdaten aus den Buchungsseiten)."""
+    path = DATA_DIR / "pages.json"
+    if not path.exists():
+        return []
+    mtime = path.stat().st_mtime
+    with _lock:
+        if _cache.get("pages_mtime") != mtime:
+            _cache["pages"] = json.loads(path.read_text(encoding="utf-8"))
+            _cache["pages_mtime"] = mtime
+        return _cache["pages"] or []
+
+
 # Bei Preis-/Zahlungsfragen die Ablefy-Buchungsseiten hochgewichten —
 # dort stehen die konkreten Preise, Raten- und Skonto-Angaben.
 _PRICE_HINTS = ("preis", "kost", "teuer", "rate", "zahl", "skonto", "rabatt",

@@ -16,6 +16,9 @@ FIXTURES_DIR = ROOT / "fixtures"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "700"))
+# Niedrige Temperature = konsistente, regelkonforme Beratung (QS-Befund:
+# bei Default 1.0 schwankten Länge, Links und Formatierung stark je Lauf).
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.3"))
 
 # Mock-Modus: ohne API-Key antwortet der Bot mit gefundenen Quellen statt LLM-Text
 MOCK_LLM = os.getenv("MOCK_LLM", "").lower() in ("1", "true", "yes") or not ANTHROPIC_API_KEY
@@ -36,10 +39,13 @@ TRUST_PROXY = os.getenv("TRUST_PROXY", "").lower() in ("1", "true", "yes")
 # 0 = deaktiviert. Zähler liegt im RAM (Neustart setzt ihn zurück).
 DAILY_MESSAGE_LIMIT = int(os.getenv("DAILY_MESSAGE_LIMIT", "1000"))
 
-# Kontaktdaten des Instituts (für Eskalation in Antworten)
+# Kontaktdaten des Instituts (für Eskalation in Antworten).
+# whatsapp_link ist der EINZIGE WhatsApp-Link, den der Bot verwenden darf —
+# das Modell darf Nummern nie selbst in Links umrechnen (QS-Befund: Tippfehler).
 CONTACT = {
     "telefon": "06021 920 8003",
     "whatsapp": "0151 544 344 70",
+    "whatsapp_link": "https://wa.me/4915154434470",
     "email": "info@deutsches-hypnoseinstitut.de",
     "kontakt_url": "https://deutsches-hypnoseinstitut.de/kontakt.html",
 }

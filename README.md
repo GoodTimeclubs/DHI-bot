@@ -1,4 +1,4 @@
-# DHI Bot — Prototyp (v0.1)
+# DHI Bot (v0.2.2)
 
 Chat-Assistent für **deutsches-hypnoseinstitut.de**: beantwortet Besucherfragen zu
 Website-Inhalten, Ausbildungen, tagesaktuellen Terminen und zur Buchung —
@@ -74,6 +74,39 @@ docker compose up
 3. Der Website-Betreiber ergänzt vor `</body>`:
    `<script src="https://BOT-DOMAIN/widget.js" data-api="https://BOT-DOMAIN" defer></script>`
 4. Datenschutzerklärung ergänzen (siehe Umsetzungsplan im Projekt).
+
+## Qualitätssicherung & Tests
+
+Zwei Test-Ebenen liegen unter `tests/` (Einrichtung: `pip install -r requirements-dev.txt`):
+
+1. **Testkatalog** — 35 Beispielfragen mit Soll-Verhalten (Inhalte, Termine, Preise,
+   Buchung, Grenzfälle wie Gesundheitsfragen, Heilversprechen, Off-Topic,
+   Prompt-Injection) in `tests/testkatalog.yaml`. Der Runner prüft jede Antwort
+   automatisch (Sie-Form, Formatierung, Links, WhatsApp-Nummer, Termine gegen
+   `data/termine.json`, Preis-Regeln) und schreibt einen Bericht nach `tests/report/`:
+
+   ```bash
+   # Server mit echtem API-Key starten (TRUST_PROXY=1 erlaubt dem Runner,
+   # das Rate-Limit per X-Forwarded-For-Rotation zu umgehen), dann:
+   python tests/run_testkatalog.py --base-url http://127.0.0.1:8000
+   ```
+
+   Der Runner funktioniert gegen jede Instanz (`--base-url https://bot.…`) und ist
+   damit auch der End-to-End-Test für den Produktivserver.
+
+2. **Playwright-Widget-Checks** — 17 UI-Tests (Desktop + Mobil) in
+   `tests/test_widget.py`: Vollbild-Chat auf kleinen Screens, Schließen-Button,
+   Tastatur-Follow per VisualViewport, 16-px-Eingabe gegen iOS-Auto-Zoom, kein
+   Auto-Fokus auf Touch-Geräten, Tippflächen, Link-Button-Renderer. Startet den
+   Bot selbst im Mock-Modus (Port 8123, keine API-Kosten):
+
+   ```bash
+   playwright install chromium   # einmalig
+   pytest tests/test_widget.py -v
+   ```
+
+Ergebnisse und behobene Befunde des QS-Laufs vom 30.07.2026: siehe
+[docs/qs/2026-07-30-qs-bericht.md](docs/qs/2026-07-30-qs-bericht.md).
 
 ## Sicherheit
 

@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="DHI Bot", version="0.1.1", lifespan=lifespan)
+app = FastAPI(title="DHI Bot", version="0.2.2", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -114,7 +114,7 @@ def _daily_ok() -> bool:
 _LIMIT_REPLY = (
     "Vielen Dank für das große Interesse! Ich habe mein heutiges Anfrage-Limit "
     "erreicht. Das DHI-Team hilft Ihnen gern direkt weiter: "
-    f"Telefon {CONTACT['telefon']}, [Beratung per WhatsApp](https://wa.me/4915154434470) "
+    f"Telefon {CONTACT['telefon']}, [Beratung per WhatsApp]({CONTACT['whatsapp_link']}) "
     f"oder per E-Mail an {CONTACT['email']}."
 )
 
