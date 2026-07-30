@@ -22,6 +22,7 @@ from .config import (
     CRAWL_ON_START,
     DAILY_MESSAGE_LIMIT,
     DATA_DIR,
+    DETERMINISTIC_TERMINE,
     MOCK_LLM,
     TIMEZONE,
     TRUST_PROXY,
@@ -57,7 +58,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="DHI Bot", version="0.2.2", lifespan=lifespan)
+app = FastAPI(title="DHI Bot", version="0.2.3", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -151,6 +152,7 @@ def health():
         "status": "ok",
         "model": ANTHROPIC_MODEL,
         "mock_mode": MOCK_LLM,
+        "deterministic_termine": DETERMINISTIC_TERMINE,
         "messages_today": _daily["count"],
         "daily_limit": DAILY_MESSAGE_LIMIT,
         **retrieval.stats(),

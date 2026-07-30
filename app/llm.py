@@ -9,10 +9,12 @@ from .config import (
     ANTHROPIC_API_KEY,
     ANTHROPIC_MODEL,
     CONTACT,
+    DETERMINISTIC_TERMINE,
     MAX_TOKENS,
     MOCK_LLM,
     TEMPERATURE,
 )
+from .termine import try_answer as _termine_try_answer
 
 KIND_LABEL = {
     "presence": "DHI 1.0 Vollpräsenz",
@@ -145,6 +147,16 @@ def _mock_reply(message: str, chunks: list[dict]) -> str:
 
 
 def answer(message: str, history: list[dict]) -> dict:
+    # Reine Terminlistenfragen deterministisch beantworten (QS-Befund 8):
+    # strukturierter Filter über termine.json statt LLM-Auswahl — der früheste
+    # passende Termin kann so nie ausgelassen werden. Greift bewusst nur bei
+    # eindeutigen Fragen; alles andere (Preise, Beratung, unbekannte Orte,
+    # Folgefragen aus dem Verlauf) läuft weiter über das LLM.
+    if DETERMINISTIC_TERMINE:
+        det = _termine_try_answer(message)
+        if det is not None:
+            return det
+
     chunks = retrieval.search(message, k=6)
     sources = []
     for c in chunks:

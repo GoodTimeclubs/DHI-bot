@@ -1,4 +1,4 @@
-# DHI Bot (v0.2.2)
+# DHI Bot (v0.2.3)
 
 Chat-Assistent für **deutsches-hypnoseinstitut.de**: beantwortet Besucherfragen zu
 Website-Inhalten, Ausbildungen, tagesaktuellen Terminen und zur Buchung —
@@ -8,12 +8,21 @@ auf Basis eines täglichen Website-Crawls und der Claude API.
 
 ```
 Besucher → widget.js (Chat) → Caddy (HTTPS) → FastAPI /api/chat → BM25-Retrieval → Claude API
-                                                        ▲
-     täglicher Crawl (03:10 Uhr) ───────────────────────┘
-     ├─ Sitemap: Hauptdomain + hybrid. + experte.
+                                                        ▲    └→ reine Terminlistenfragen:
+     täglicher Crawl (03:10 Uhr) ───────────────────────┘       deterministisch aus termine.json
+     ├─ Sitemap: Hauptdomain + hybrid. + experte.               (app/termine.py, ohne LLM)
      ├─ Termine: assets/js/dhi-seminarkalender.js (strukturiert geparst)
      └─ Buchungsseiten: dhi2.de (Ablefy) — Preise, Raten, Restplätze
 ```
+
+**Deterministische Terminantworten (v0.2.3, QS-Befund 8):** Eindeutige
+Terminlistenfragen („Welche Übungstage gibt es in Stuttgart?") beantwortet der Bot
+per strukturiertem Filter über `data/termine.json` — chronologisch, der früheste
+passende Termin kann nie mehr ausgelassen werden, Antwortzeit < 0,5 s, keine
+API-Kosten. Das Gating ist bewusst konservativ: Preise, Buchung, unbekannte
+Wunsch-Orte („… in Frankfurt?"), Konzept- und Folgefragen laufen weiter über das
+LLM, das Alternativen und Beratung anbieten kann. Abschaltbar per
+`DETERMINISTIC_TERMINE=0`.
 
 ## Schnellstart (Docker)
 
@@ -62,6 +71,8 @@ docker compose up
 - `ANTHROPIC_MODEL` — Standard: `claude-haiku-4-5-20251001` (günstig/schnell)
 - `CRAWL_ON_START` — `auto` (Standard) | `always` | `never`
 - `CRAWL_HOUR` — Stunde des täglichen Re-Crawls (Europe/Berlin)
+- `DETERMINISTIC_TERMINE` — `1` (Standard): reine Terminlistenfragen deterministisch
+  aus `termine.json` beantworten statt per LLM-Auswahl (QS-Befund 8); `0` = aus
 - `ALLOWED_ORIGINS` — für den Produktivbetrieb auf die Website-Domains einschränken
 - `DOMAIN` — leer = lokal (`http://localhost`); produktiv die Bot-Domain eintragen,
   Caddy holt dann automatisch TLS-Zertifikate (Let's Encrypt)
@@ -77,9 +88,14 @@ docker compose up
 
 ## Qualitätssicherung & Tests
 
-Zwei Test-Ebenen liegen unter `tests/` (Einrichtung: `pip install -r requirements-dev.txt`):
+Drei Test-Ebenen liegen unter `tests/` (Einrichtung: `pip install -r requirements-dev.txt`):
 
-1. **Testkatalog** — 35 Beispielfragen mit Soll-Verhalten (Inhalte, Termine, Preise,
+0. **Unit-Tests Terminfilter** — `pytest tests/test_termine.py` prüft ohne Server
+   und ohne API-Key, dass deterministische Terminantworten nie den frühesten
+   passenden Termin auslassen und dass Beratungs-, Preis- und Frankfurt-Fragen
+   weiterhin an das LLM gehen.
+
+1. **Testkatalog** — 36 Beispielfragen mit Soll-Verhalten (Inhalte, Termine, Preise,
    Buchung, Grenzfälle wie Gesundheitsfragen, Heilversprechen, Off-Topic,
    Prompt-Injection) in `tests/testkatalog.yaml`. Der Runner prüft jede Antwort
    automatisch (Sie-Form, Formatierung, Links, WhatsApp-Nummer, Termine gegen

@@ -79,6 +79,16 @@ chronologische Terminliste + explizite Regel; das Problem tritt seltener, aber n
 auf. Alle genannten Termine sind real (keine Erfindungen) — es ist ein
 Auslassungs-, kein Halluzinationsproblem.
 
+> **Nachtrag 30.07.2026 (v0.2.3): behoben.** Reine Terminlistenfragen werden jetzt
+> deterministisch per strukturiertem Filter über `data/termine.json` beantwortet
+> (`app/termine.py`), nicht mehr per LLM-Auswahl — chronologisch, der früheste
+> passende Termin steht garantiert zuerst. Konservatives Gating: Preise, Buchung,
+> unbekannte Wunsch-Orte („Frankfurt") und Konzeptfragen laufen weiter über das LLM.
+> Abgesichert durch `tests/test_termine.py` (12 Unit-Tests, u.a. Property-Test über
+> alle Filterkombinationen), verschärftes `top: 1` bei B4 sowie den neuen Fall B7;
+> Verifikationslauf mit echtem Haiku: B1–B7 und C7 alle PASS (deterministische
+> Fälle in < 0,5 s ohne API-Kosten). Abschaltbar per `DETERMINISTIC_TERMINE=0`.
+
 ## Offene Punkte
 
 - **Zwei Stil-Flakes** verbleiben (je Lauf ~2 von 35): (a) bei
@@ -87,9 +97,8 @@ Auslassungs-, kein Halluzinationsproblem.
   (>120 Wörter) bei Selbstbeschreibung/Erklärfragen, selten ein `*kursiv*`.
   Schweregrad niedrig; bei Bedarf wäre der nächste Schritt ein serverseitiger
   Nachbearbeitungs-/Retry-Schritt statt weiterer Prompt-Arbeit.
-- **Terminlisten-Auslassung** (Befund 8): Falls das in der Praxis stört, empfiehlt
-  sich mittelfristig eine deterministische Terminantwort (strukturierter Filter über
-  `termine.json` statt LLM-Auswahl) für reine Terminfragen.
+- ~~**Terminlisten-Auslassung** (Befund 8)~~ — **erledigt in v0.2.3**: deterministische
+  Terminantworten für reine Terminlistenfragen (siehe Nachtrag zu Befund 8).
 - **Preisfrage ans Institut:** Die Ablefy-Seite zu DHI 2.0 zeigt „239,60 €" mit dem
   Zusatz „Der Betrag wird in 4 Monatsraten beglichen". Ob das eine Monatsrate oder
   ein in vier Raten gezahlter Gesamtbetrag ist, gibt die Seite nicht eindeutig her —

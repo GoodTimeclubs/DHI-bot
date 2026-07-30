@@ -23,6 +23,11 @@ TEMPERATURE = float(os.getenv("TEMPERATURE", "0.3"))
 # Mock-Modus: ohne API-Key antwortet der Bot mit gefundenen Quellen statt LLM-Text
 MOCK_LLM = os.getenv("MOCK_LLM", "").lower() in ("1", "true", "yes") or not ANTHROPIC_API_KEY
 
+# Reine Terminlistenfragen deterministisch aus termine.json beantworten statt
+# per LLM-Auswahl (QS-Befund 8: Modell ließ selten den frühesten Termin aus).
+# 0 = abschalten, dann beantwortet wieder das LLM alle Terminfragen.
+DETERMINISTIC_TERMINE = os.getenv("DETERMINISTIC_TERMINE", "1").lower() in ("1", "true", "yes")
+
 CRAWL_ON_START = os.getenv("CRAWL_ON_START", "auto").lower()  # auto | always | never
 CRAWL_HOUR = int(os.getenv("CRAWL_HOUR", "3"))
 REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "0.5"))

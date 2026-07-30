@@ -129,10 +129,13 @@ faelle:
     frage: "Welche Übungstage gibt es in Stuttgart?"
     soll: >
       Nennt die nächsten Übungstage in Stuttgart mit Datum und Stufe, plus
-      Buchungslink.
+      Buchungslink. Seit v0.2.3 deterministisch aus termine.json (QS-Befund 8),
+      daher top: 1 — der FRÜHESTE Termin muss genannt sein. (Mit
+      DETERMINISTIC_TERMINE=0 kann dieser Check wieder flaky werden.)
     checks:
       must_all: ["stuttgart"]
-      next_termin: { kind: "practice", location: "Stuttgart", top: 3 }
+      next_termin: { kind: "practice", location: "Stuttgart", top: 1 }
+      link_any: ["dhi2.de"]
 
   - id: B5-theorie-online
     kategorie: termine
@@ -152,6 +155,19 @@ faelle:
       reinen Übungstage) mit Buchungslink.
     checks:
       next_termin: { stage: "3", kind: "presence|hybrid", top: 3 }
+      link_any: ["dhi2.de"]
+
+  - id: B7-uebungstage-leipzig-frueheste
+    kategorie: termine
+    frage: "Welche Übungstage gibt es in Leipzig?"
+    soll: >
+      Deterministische Terminantwort (v0.2.3, QS-Befund 8): Liste kommt per
+      strukturiertem Filter aus termine.json, beginnt garantiert beim
+      frühesten Leipzig-Übungstag (top: 1) und enthält einen Buchungslink.
+      (Mit DETERMINISTIC_TERMINE=0 kann dieser Check wieder flaky werden.)
+    checks:
+      must_all: ["leipzig"]
+      next_termin: { kind: "practice", location: "Leipzig", top: 1 }
       link_any: ["dhi2.de"]
 
   # ── C · Preise & Buchung ───────────────────────────────────────────────────
