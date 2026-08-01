@@ -1,13 +1,36 @@
-/* DHI Bot — einbettbares Chat-Widget.
+/* DHI Bot — einbettbares Chat-Widget (v0.3.1).
  * Einbau auf einer Website:
- *   <script src="https://BOT-DOMAIN/widget.js" data-api="https://BOT-DOMAIN" defer></script>
+ *   <script src="https://BOT-DOMAIN/widget.js" data-api="https://BOT-DOMAIN"
+ *           data-desktop-bottom="96" data-mobile-button="off" defer></script>
  * Ohne data-api wird der Origin verwendet, von dem widget.js geladen wurde.
+ * data-desktop-bottom hebt den Start-Button über bestehende Floats (z. B.
+ * WhatsApp-Button); data-mobile-button="off" blendet den Float mobil aus —
+ * die Website öffnet den Chat dann über eigene Elemente mit dem Attribut
+ * data-dhi-chat oder per window.DHIBot.open()/close()/toggle().
  * Mobil: Vollbild-Modus mit Schließen-Button, folgt der Bildschirmtastatur
  * (VisualViewport), 16px-Eingabe gegen iOS-Auto-Zoom, größere Touch-Ziele.
  */
 (() => {
-  const scriptEl = document.currentScript;
+  // Idempotenz-Guard: doppeltes Laden des Scripts darf keine zweite Instanz bauen.
+  if (window.__dhiBotLoaded) return;
+  window.__dhiBotLoaded = true;
+
+  const VERSION = "0.3.1";
+  // Fallback auf querySelector, falls currentScript fehlt (z. B. dynamisches Nachladen).
+  const scriptEl = document.currentScript ||
+    document.querySelector('script[src*="widget.js"]');
   const API = (scriptEl && scriptEl.dataset.api) || (scriptEl ? new URL(scriptEl.src).origin : "");
+
+  // Einbettungs-Optionen vom eigenen <script>-Tag:
+  //   data-desktop-bottom  Abstand des Start-Buttons vom unteren Rand in px.
+  //                        Default 20 (bestehende Einbindungen bleiben unverändert);
+  //                        NaN, <0 oder >400 fallen auf den Default zurück.
+  //   data-mobile-button   "auto" (Default) | "off" — "off" blendet den Float
+  //                        mobil aus, die CTA-Leiste der Website übernimmt.
+  const rawBottom = parseInt(scriptEl && scriptEl.dataset.desktopBottom, 10);
+  const BTN_BOTTOM = Number.isFinite(rawBottom) && rawBottom >= 0 && rawBottom <= 400
+    ? rawBottom : 20;
+  const MOBILE_BUTTON = (scriptEl && scriptEl.dataset.mobileButton) === "off" ? "off" : "auto";
 
   const SUGGESTIONS = [
     "Wann ist der nächste Termin für Stufe 1+2?",
@@ -18,6 +41,10 @@
 
   const host = document.createElement("div");
   host.id = "dhi-bot-widget";
+  // Position als CSS-Variable am Host — Button und Panel leiten alle Werte
+  // daraus ab, statt Festwerte zu duplizieren.
+  host.style.setProperty("--dhi-btn-bottom", BTN_BOTTOM + "px");
+  if (MOBILE_BUTTON === "off") host.setAttribute("data-mobile-button", "off");
   document.body.appendChild(host);
   const root = host.attachShadow({ mode: "open" });
 
@@ -27,15 +54,19 @@
     * { box-sizing: border-box; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
         -webkit-tap-highlight-color: transparent; }
     .btn {
-      position: fixed; right: 20px; bottom: 20px; z-index: 999999;
+      position: fixed; right: 20px; bottom: var(--dhi-btn-bottom, 20px); z-index: 999999;
       width: 60px; height: 60px; border-radius: 50%; border: none; cursor: pointer;
       background: #1d3557; color: #fff; font-size: 26px;
       box-shadow: 0 4px 14px rgba(0,0,0,.25); transition: transform .15s;
     }
     .btn:hover { transform: scale(1.06); }
     .panel {
-      position: fixed; right: 20px; bottom: 92px; z-index: 999999;
-      width: 370px; max-width: calc(100vw - 32px); height: 540px; max-height: calc(100vh - 120px);
+      position: fixed; right: 20px; bottom: calc(var(--dhi-btn-bottom, 20px) + 72px); z-index: 999999;
+      width: 370px; max-width: calc(100vw - 32px); height: 540px;
+      /* Reserve unten = Button-Offset + 100px — beim Default 20 exakt die
+         120px aus v0.3.0; die dvh-Zeile überschreibt vh, wo unterstützt. */
+      max-height: calc(100vh - var(--dhi-btn-bottom, 20px) - 100px);
+      max-height: calc(100dvh - var(--dhi-btn-bottom, 20px) - 100px);
       background: #fff; border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,.28);
       display: none; flex-direction: column; overflow: hidden;
     }
@@ -86,9 +117,16 @@
                padding-bottom: env(safe-area-inset-bottom, 0px); }
       .btn.hidden { display: none; }
     }
+    /* data-mobile-button="off": Float per Media Query ausblenden — CSS statt
+       einmaligem JS-Check, damit der Zustand auch nach Rotation/Resize stimmt.
+       Das Sicherheitsnetz (unten) entfernt das Host-Attribut, falls die Seite
+       gar keine [data-dhi-chat]-Trigger hat. */
+    @media (max-width: 640px) {
+      :host([data-mobile-button="off"]) .btn { display: none; }
+    }
   </style>
-  <button class="btn" title="Chat öffnen">💬</button>
-  <div class="panel" role="dialog" aria-label="DHI Chat-Assistent">
+  <button class="btn" title="Chat öffnen" aria-expanded="false" aria-controls="dhi-bot-panel">💬</button>
+  <div class="panel" id="dhi-bot-panel" role="dialog" aria-label="DHI Chat-Assistent">
     <div class="head">
       <div class="txt">
         <b>DHI-Assistent</b>
@@ -212,9 +250,24 @@
     msgs.scrollTop = Math.max(0, wait.offsetTop - 10);
   }
 
+  // Auslösendes Element (eigener Button oder [data-dhi-chat]-Trigger) —
+  // bekommt beim Schließen den Fokus zurück (A11y).
+  let lastTrigger = null;
+
+  // aria-expanded am eigenen Button und an allen [data-dhi-chat]-Triggern
+  // pflegen; aria-controls zeigt auf die Panel-ID.
+  function syncAria(open) {
+    btn.setAttribute("aria-expanded", String(open));
+    document.querySelectorAll("[data-dhi-chat]").forEach((el) => {
+      el.setAttribute("aria-expanded", String(open));
+      if (!el.hasAttribute("aria-controls")) el.setAttribute("aria-controls", "dhi-bot-panel");
+    });
+  }
+
   function setOpen(open) {
     panel.classList.toggle("open", open);
     btn.classList.toggle("hidden", open); // im Vollbild läge der Start-Button sonst unterm Panel
+    syncAria(open);
     if (open && !msgs.childElementCount) {
       add("bot", "Schön, dass Sie da sind! Ich bin der digitale Ausbildungsberater des DHI " +
         "und helfe Ihnen gern bei Ausbildungswahl, Terminen, Preisen und Buchung. " +
@@ -224,12 +277,51 @@
     // Auf Touch-Geräten nicht automatisch fokussieren — das würde sofort
     // die Bildschirmtastatur öffnen (und auf iOS in die Seite zoomen).
     if (open && !isTouch) ta.focus();
+    if (!open && lastTrigger) {
+      try { lastTrigger.focus(); } catch (e) { /* Trigger nicht mehr fokussierbar */ }
+      lastTrigger = null;
+    }
     fitPanel();
   }
-  btn.onclick = () => setOpen(!panel.classList.contains("open"));
+  const toggle = () => setOpen(!panel.classList.contains("open"));
+  btn.onclick = () => { lastTrigger = btn; toggle(); };
   closeBtn.onclick = () => setOpen(false);
   send.onclick = submit;
   ta.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
   });
+
+  // Öffentliche API, z. B. für eigene Buttons der Website.
+  window.DHIBot = {
+    version: VERSION,
+    open: () => setOpen(true),
+    close: () => setOpen(false),
+    toggle,
+  };
+
+  // Externe Trigger: EIN delegierter Klick-Listener statt querySelectorAll —
+  // funktioniert damit auch für CTA-Leisten, die erst nach dem Widget
+  // gerendert werden. Bei Links keine Navigation auslösen.
+  document.addEventListener("click", (e) => {
+    const t = e.target && e.target.closest ? e.target.closest("[data-dhi-chat]") : null;
+    if (!t) return;
+    if (t.tagName === "A") e.preventDefault();
+    lastTrigger = t;
+    toggle();
+  });
+
+  // Sicherheitsnetz zu data-mobile-button="off": Existiert nach DOMContentLoaded
+  // (plus 500 ms Nachlauf für nachträglich gerenderte Leisten) KEIN
+  // [data-dhi-chat]-Trigger im DOM — etwa auf einer Subdomain ohne CTA-Leiste —,
+  // wird der Float wieder eingeblendet; sonst wäre der Chat dort mobil unerreichbar.
+  if (MOBILE_BUTTON === "off") {
+    const ensureReachable = () => setTimeout(() => {
+      if (!document.querySelector("[data-dhi-chat]")) host.removeAttribute("data-mobile-button");
+    }, 500);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", ensureReachable, { once: true });
+    } else {
+      ensureReachable();
+    }
+  }
 })();

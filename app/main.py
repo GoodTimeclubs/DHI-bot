@@ -174,4 +174,10 @@ def demo():
 
 @app.get("/widget.js")
 def widget():
-    return FileResponse(STATIC / "widget.js", media_type="application/javascript")
+    # Kurzer Browser-Cache (5 Min): Widget-Updates greifen zügig, ohne dass
+    # das Institut das Einbindungs-Snippet je anfassen muss.
+    return FileResponse(
+        STATIC / "widget.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )

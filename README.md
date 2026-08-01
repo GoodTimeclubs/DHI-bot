@@ -1,4 +1,4 @@
-# DHI Bot (v0.3.0)
+# DHI Bot (v0.3.1)
 
 Chat-Assistent für **deutsches-hypnoseinstitut.de** und alle DHI-Subdomains:
 beantwortet Besucherfragen zu Website-Inhalten, Ausbildungen, dem
@@ -89,7 +89,7 @@ docker compose up
 | Endpunkt | Beschreibung |
 |---|---|
 | `GET /` | Demo-Seite mit eingebettetem Widget |
-| `GET /widget.js` | Einbettbares Chat-Widget |
+| `GET /widget.js` | Einbettbares Chat-Widget (`Cache-Control: public, max-age=300`) |
 | `POST /api/chat` | `{"message": "...", "history": [...]}` → `{"reply", "sources", "mock"}` |
 | `GET /api/health` | Status: Index-Größe, Termine, Modell, Mock-Modus |
 | `POST /api/reindex` | Manueller Re-Crawl (Header `X-Admin-Token: <ADMIN_TOKEN>`) |
@@ -120,8 +120,40 @@ docker compose up
 2. `ALLOWED_ORIGINS` auf alle Domains setzen, auf denen das Widget eingebunden
    wird (Hauptdomain + Subdomains).
 3. Der Website-Betreiber ergänzt vor `</body>`:
-   `<script src="https://BOT-DOMAIN/widget.js" data-api="https://BOT-DOMAIN" defer></script>`
+
+   ```html
+   <script src="https://bot.deutsches-hypnoseinstitut.de/widget.js"
+           data-api="https://bot.deutsches-hypnoseinstitut.de"
+           data-desktop-bottom="96"
+           data-mobile-button="off"
+           defer></script>
+   ```
+
+   | Attribut | Default | Wirkung |
+   |---|---|---|
+   | `data-api` | Origin von `widget.js` | Basis-URL der Bot-API |
+   | `data-desktop-bottom` | `20` | Abstand des Chat-Buttons vom unteren Rand in px (Ganzzahl 0–400; ungültige Werte fallen auf den Default zurück). Chat-Panel und maximale Panel-Höhe wandern mit. |
+   | `data-mobile-button` | `auto` | `off` blendet den schwebenden Button bei ≤ 640 px Viewport-Breite aus — den Chat öffnen dann Elemente mit `data-dhi-chat` (CTA-Leiste) oder `window.DHIBot`. |
+
+   Alle Attribute sind optional — ohne sie verhält sich das Widget wie bisher.
+
+   **Rechenregel Desktop-Offset:** `data-desktop-bottom` = bottom-Wert des
+   WhatsApp-Buttons + dessen Höhe + 16 px Abstand. Institut: 20 + 60 + 16 = **96**.
+
+   **Mobile CTA-Leiste:** Das Institut baut das Chat-Element selbst in seine
+   Leiste ein und markiert es mit `data-dhi-chat`, z. B.
+   `<a href="#chat" data-dhi-chat>Chat</a>`. Der delegierte Listener des Widgets
+   fängt Klicks auch auf nachträglich gerendertem Markup ab, unterdrückt bei
+   `<a>` die Navigation und pflegt `aria-expanded`/`aria-controls` am Trigger.
+   Dazu gibt es die JS-API `window.DHIBot.open()` / `.close()` / `.toggle()`
+   (+ `.version`). Sicherheitsnetz: Ist `data-mobile-button="off"` gesetzt,
+   aber kurz nach DOMContentLoaded kein `[data-dhi-chat]` im DOM (z. B.
+   Subdomain ohne CTA-Leiste), erscheint der mobile Button trotzdem — der Chat
+   bleibt überall erreichbar.
 4. Datenschutzerklärung ergänzen (siehe Umsetzungsplan im Projekt).
+
+Widget-Updates greifen ohne erneute HTML-Änderung: `/widget.js` wird mit
+`Cache-Control: public, max-age=300` ausgeliefert (max. 5 Minuten Browser-Cache).
 
 ## Qualitätssicherung & Tests
 
@@ -154,10 +186,15 @@ Drei Test-Ebenen liegen unter `tests/` (Einrichtung: `pip install -r requirement
    Der Runner funktioniert gegen jede Instanz (`--base-url https://bot.…`) und ist
    damit auch der End-to-End-Test für den Produktivserver.
 
-2. **Playwright-Widget-Checks** — 17 UI-Tests (Desktop + Mobil) in
+2. **Playwright-Widget-Checks** — 23 UI-Tests (Desktop + Mobil) in
    `tests/test_widget.py`: Vollbild-Chat auf kleinen Screens, Schließen-Button,
    Tastatur-Follow per VisualViewport, 16-px-Eingabe gegen iOS-Auto-Zoom, kein
-   Auto-Fokus auf Touch-Geräten, Tippflächen, Link-Button-Renderer. Startet den
+   Auto-Fokus auf Touch-Geräten, Tippflächen, Link-Button-Renderer; seit v0.3.1
+   zusätzlich die Button-Landschaft der Instituts-Website (Nachbau als
+   Fixture-Seite mit WhatsApp-Float und 5-spaltiger CTA-Leiste):
+   `data-desktop-bottom`-Stapelung ohne Überlagerung, Panel vollständig im
+   700-px-Viewport, `data-mobile-button="off"` inkl. Sicherheitsnetz ohne
+   CTA-Leiste, Öffnen per `[data-dhi-chat]` und `window.DHIBot`. Startet den
    Bot selbst im Mock-Modus (Port 8123, keine API-Kosten):
 
    ```bash

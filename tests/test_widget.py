@@ -176,10 +176,15 @@ def test_desktop_schliessen(desktop):
 
 def test_desktop_chat_roundtrip_linkbuttons(desktop):
     """T06: Frage → Antwort-Roundtrip; URLs werden als Button-Links gerendert
-    (Renderer aus v0.1.1)."""
-    open_chat(desktop)
-    w = send_frage(desktop, "Wann ist der nächste Termin für Stufe 1+2?")
-    btn = w.locator(".m.bot").nth(1).locator("a.btnlink").first
+    (Renderer aus v0.1.1). Seit der Gate-Erweiterung vom 01.08. beantwortet
+    die deterministische Termin-Logik diese Frage (statt des TESTMODUS-Mocks) —
+    der Check prüft den Renderer damit am echten Produktionspfad."""
+    w = open_chat(desktop)
+    w.locator("textarea").fill("Wann ist der nächste Termin für Stufe 1+2?")
+    w.locator(".inp button").click()
+    antwort = w.locator(".m.bot").nth(1)
+    expect(antwort).to_contain_text("Stufe 1+2", timeout=20_000)
+    btn = antwort.locator("a.btnlink").first
     expect(btn).to_be_visible()
     assert btn.get_attribute("target") == "_blank"
     assert (btn.get_attribute("href") or "").startswith("http")
@@ -281,3 +286,143 @@ def test_widgetjs_mobile_css_regression(server):
     for merkmal in ("100dvh", "safe-area-inset-bottom", "pointer: coarse",
                     "visualViewport"):
         assert merkmal in js, f"{merkmal} fehlt in widget.js"
+
+
+# ── Button-Landschaft der Instituts-Website (v0.3.1) ────────────────────────
+# Fixture-Seite, die den Aufbau der echten Website nachstellt: fixierter
+# Pseudo-WhatsApp-Button (bottom 20px, 60x60) und eine 5-spaltige CTA-Leiste
+# am unteren Rand (nur mobil sichtbar), deren 5. Element den Chat per
+# [data-dhi-chat] öffnet. Ausgeliefert per page.route — kein neues File nötig,
+# widget.js kommt weiterhin vom echten Testserver (gleicher Origin).
+
+CTA_LEISTE = """
+  <nav id="cta-leiste" aria-label="Schnellkontakt">
+    <a href="tel:+4960219208003">Anruf</a>
+    <a href="https://wa.me/4915154434470">WhatsApp</a>
+    <a href="mailto:info@example.de">E-Mail</a>
+    <a href="/seminarkalender.html">Termine</a>
+    <a href="#chat" id="cta-chat" data-dhi-chat>Chat</a>
+  </nav>
+"""
+
+
+def _institut_html(server: str, attrs: str = "", cta: bool = True) -> str:
+    return f"""<!doctype html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  #wa-float {{ position: fixed; right: 20px; bottom: 20px; width: 60px; height: 60px;
+               border-radius: 50%; background: #25d366; border: 0; z-index: 99999; }}
+  #cta-leiste {{ position: fixed; left: 0; right: 0; bottom: 0; display: none;
+                 grid-template-columns: repeat(5, 1fr); background: #1d3557; z-index: 99998; }}
+  #cta-leiste a {{ color: #fff; text-align: center; padding: 14px 4px;
+                   font: 13px sans-serif; text-decoration: none; }}
+  @media (max-width: 640px) {{ #cta-leiste {{ display: grid; }} #wa-float {{ display: none; }} }}
+</style></head>
+<body>
+<h1>Deutsches Hypnoseinstitut — Test-Fixture</h1>
+<button id="wa-float" title="WhatsApp"></button>
+{CTA_LEISTE if cta else ""}
+<script src="{server}/widget.js" data-api="{server}" {attrs} defer></script>
+</body></html>"""
+
+
+def _open_institut(browser, server, profil: dict, attrs: str = "", cta: bool = True):
+    """Öffnet die Instituts-Fixture-Seite; Widget wird angehängt (der Float
+    kann je nach Attributen bewusst unsichtbar sein — daher kein visible-Wait)."""
+    ctx = browser.new_context(**profil)
+    page = ctx.new_page()
+    html = _institut_html(server, attrs, cta)
+    page.route("**/institut.html", lambda route: route.fulfill(
+        status=200, content_type="text/html; charset=utf-8", body=html))
+    page.goto(f"{server}/institut.html", wait_until="domcontentloaded")
+    page.wait_for_selector("#dhi-bot-widget", state="attached")
+    return ctx, page
+
+
+def test_desktop_offset_ueber_whatsapp(browser, server):
+    """T18: data-desktop-bottom="96" stapelt den Chat-Button ÜBER den
+    WhatsApp-Float — gleiche Flucht rechts, keine Überlagerung."""
+    ctx, page = _open_institut(browser, server, DESKTOP, 'data-desktop-bottom="96"')
+    try:
+        chat = page.locator("#dhi-bot-widget .btn").bounding_box()
+        wa = page.locator("#wa-float").bounding_box()
+        assert chat["y"] + chat["height"] <= wa["y"], \
+            f"Chat-Button ({chat}) überlappt den WhatsApp-Button ({wa})"
+        assert chat["y"] < wa["y"], "Chat-Button liegt nicht über dem WhatsApp-Button"
+        # gleiche rechte Flucht (beide right: 20px)
+        assert abs((chat["x"] + chat["width"]) - (wa["x"] + wa["width"])) <= 2
+    finally:
+        ctx.close()
+
+
+def test_desktop_offset_panel_im_viewport(browser, server):
+    """T19: Panel wandert mit dem Offset mit (bottom = Offset + 72) und bleibt
+    auch auf einem nur 700px hohen Viewport vollständig sichtbar."""
+    ctx, page = _open_institut(browser, server,
+                               {"viewport": {"width": 1280, "height": 700}},
+                               'data-desktop-bottom="96"')
+    try:
+        w = widget(page)
+        w.locator(".btn").click()
+        expect(w.locator(".panel")).to_be_visible()
+        box = w.locator(".panel").bounding_box()
+        assert box["y"] >= 0, f"Panel oben abgeschnitten (y={box['y']})"
+        assert box["y"] + box["height"] <= 700.5, "Panel unten abgeschnitten"
+        abstand_unten = 700 - (box["y"] + box["height"])
+        assert abs(abstand_unten - 168) <= 2, \
+            f"Panel klebt nicht bei Offset+72=168px über dem Rand ({abstand_unten}px)"
+    finally:
+        ctx.close()
+
+
+def test_mobil_button_off_float_versteckt(browser, server):
+    """T20: data-mobile-button="off" blendet den eigenen Float mobil aus —
+    auch nach dem 500-ms-Sicherheitsnetz (CTA-Leiste ist ja vorhanden)."""
+    ctx, page = _open_institut(browser, server, MOBIL, 'data-mobile-button="off"')
+    try:
+        expect(page.locator("#dhi-bot-widget .btn")).to_be_hidden()
+        page.wait_for_timeout(800)  # Sicherheitsnetz darf NICHT anspringen
+        expect(page.locator("#dhi-bot-widget .btn")).to_be_hidden()
+    finally:
+        ctx.close()
+
+
+def test_mobil_cta_trigger_oeffnet(browser, server):
+    """T21: Klick auf das [data-dhi-chat]-Element der CTA-Leiste öffnet das
+    Panel (delegierter Listener), ohne dass der <a>-Link navigiert."""
+    ctx, page = _open_institut(browser, server, MOBIL, 'data-mobile-button="off"')
+    try:
+        w = widget(page)
+        page.locator("#cta-chat").click()
+        expect(w.locator(".panel")).to_be_visible()
+        assert page.url.endswith("institut.html"), "Anker-Link hat navigiert"
+        assert page.locator("#cta-chat").get_attribute("aria-expanded") == "true"
+    finally:
+        ctx.close()
+
+
+def test_desktop_dhibot_api(browser, server):
+    """T22: window.DHIBot.open() öffnet das Panel, close() schließt es —
+    auch ganz ohne die neuen data-Attribute."""
+    ctx, page = _open_institut(browser, server, DESKTOP)
+    try:
+        w = widget(page)
+        page.evaluate("window.DHIBot.open()")
+        expect(w.locator(".panel")).to_be_visible()
+        page.evaluate("window.DHIBot.close()")
+        expect(w.locator(".panel")).to_be_hidden()
+    finally:
+        ctx.close()
+
+
+def test_mobil_fallback_ohne_cta(browser, server):
+    """T23: Sicherheitsnetz — "off" auf einer Seite OHNE [data-dhi-chat]
+    (z. B. Subdomain ohne CTA-Leiste): der Float erscheint nach kurzem
+    Nachlauf trotzdem, sonst wäre der Chat dort mobil unerreichbar."""
+    ctx, page = _open_institut(browser, server, MOBIL,
+                               'data-mobile-button="off"', cta=False)
+    try:
+        expect(page.locator("#dhi-bot-widget .btn")).to_be_visible(timeout=5000)
+    finally:
+        ctx.close()

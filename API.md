@@ -1,4 +1,4 @@
-# DHI Bot — API-Dokumentation (v0.2)
+# DHI Bot — API-Dokumentation (v0.3.1)
 
 REST-API des DHI-Chatbots. Alle Anfragen und Antworten sind JSON (UTF-8).
 
@@ -17,7 +17,7 @@ Eine interaktive Übersicht (Swagger UI) liefert FastAPI automatisch unter
 | `GET` | `/api/health` | Status, Datenstand, Zähler | keine |
 | `POST` | `/api/reindex` | Website neu crawlen + Index neu bauen | `X-Admin-Token` |
 | `GET` | `/` | Demo-Seite mit eingebettetem Widget | keine |
-| `GET` | `/widget.js` | Einbettbares Chat-Widget (JavaScript) | keine |
+| `GET` | `/widget.js` | Einbettbares Chat-Widget (JavaScript); `Cache-Control: public, max-age=300` | keine |
 
 ---
 
@@ -157,14 +157,58 @@ Falscher/fehlender Token: `403`.
 ## Widget-Einbindung (fertiger API-Client)
 
 Das mitgelieferte Widget übernimmt Verlauf, Rendering (Buttons, Listen) und
-Fehlerbehandlung. Einbindung auf einer Website mit einer Zeile vor `</body>`:
+Fehlerbehandlung. Einbindung auf einer Website vor `</body>`:
 
 ```html
-<script src="https://bot.example.de/widget.js" data-api="https://bot.example.de" defer></script>
+<script src="https://bot.example.de/widget.js"
+        data-api="https://bot.example.de"
+        data-desktop-bottom="96"
+        data-mobile-button="off"
+        defer></script>
 ```
 
-`data-api` ist optional — ohne das Attribut nutzt das Widget den Origin, von dem
-`widget.js` geladen wurde.
+### Attribute am `<script>`-Tag
+
+| Attribut | Default | Wirkung |
+|---|---|---|
+| `data-api` | Origin, von dem `widget.js` geladen wurde | Basis-URL der Bot-API |
+| `data-desktop-bottom` | `20` | Abstand des Chat-Buttons vom unteren Rand in px (Ganzzahl 0–400; NaN oder außerhalb des Bereichs → Default). Das Panel sitzt bei `Offset + 72 px`, seine maximale Höhe leitet sich ebenfalls ab — beides wandert also mit. |
+| `data-mobile-button` | `auto` | `off`: der schwebende Button wird bei ≤ 640 px Viewport-Breite per Media Query ausgeblendet (robust gegen Rotation/Resize); das Öffnen übernimmt die Website (s. u.). Sicherheitsnetz: Findet sich kurz nach DOMContentLoaded kein `[data-dhi-chat]` im DOM, erscheint der Button mobil trotzdem. |
+
+Alle Attribute sind optional — ohne sie verhält sich das Widget wie bisher
+(Button rechts unten bei 20 px). Rechenregel für den Desktop-Offset über einem
+vorhandenen Float: dessen `bottom`-Wert + dessen Höhe + 16 px Abstand
+(z. B. WhatsApp-Button: 20 + 60 + 16 = 96).
+
+### Externe Trigger: `data-dhi-chat`
+
+Jedes Element mit dem Attribut `data-dhi-chat` (z. B. der Chat-Eintrag einer
+mobilen CTA-Leiste) öffnet bzw. schließt den Chat:
+
+```html
+<a href="#chat" data-dhi-chat>Chat</a>
+```
+
+Der Klick wird per delegiertem Listener abgefangen — das funktioniert auch für
+Markup, das erst nach dem Widget gerendert wird. Bei `<a>`-Elementen wird die
+Navigation unterdrückt. Das Widget pflegt an den Triggern `aria-expanded` und
+`aria-controls`; beim Schließen kehrt der Fokus zum auslösenden Element zurück.
+
+### JS-API: `window.DHIBot`
+
+```js
+window.DHIBot.open();    // Chat öffnen (Fokus ins Eingabefeld, außer auf Touch)
+window.DHIBot.close();   // Chat schließen (Fokus zurück zum Auslöser)
+window.DHIBot.toggle();  // umschalten
+window.DHIBot.version;   // z. B. "0.3.1"
+```
+
+Die Initialisierung ist idempotent — wird das Script versehentlich doppelt
+eingebunden, entsteht keine zweite Instanz.
+
+`/widget.js` wird mit `Cache-Control: public, max-age=300` ausgeliefert —
+Widget-Updates erreichen Besucher binnen 5 Minuten, ohne dass das
+Einbindungs-Snippet geändert werden muss.
 
 ---
 
