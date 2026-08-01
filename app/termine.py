@@ -176,7 +176,7 @@ def _zeile(s: dict, f: dict, fett: bool) -> str:
         teile.append(ort)
     zeile = " · ".join(teile)
     if s.get("url"):
-        zeile += f" — [Jetzt buchen]({s['url']})"
+        zeile += f" · [Jetzt buchen]({s['url']})"
     return f"- {zeile}"
 
 
@@ -186,21 +186,21 @@ def _intro(f: dict, treffer: list[dict]) -> str:
     if ort and all(s.get("kind") == "practice" for s in treffer):
         return (
             f"In {ort} finden die Präsenz-Übungstage{stufe} der DHI 2.0 Ausbildung "
-            "statt — die Theorie dazu absolvieren Sie vorab live online. "
+            "statt. Die Theorie dazu absolvieren Sie vorab live online. "
             "Die nächsten Termine:"
         )
     if ort:
-        return f"Gern — die nächsten Termine{stufe} in {ort}:"
+        return f"Gern, die nächsten Termine{stufe} in {ort}:"
     kinds = f.get("kinds") or set()
     if kinds == {"practice"}:
-        return f"Gern — die nächsten Präsenz-Übungstage{stufe} (DHI 2.0):"
+        return f"Gern, die nächsten Präsenz-Übungstage{stufe} (DHI 2.0):"
     if kinds == {"presence"}:
-        return f"Gern — die nächsten Vollpräsenz-Termine{stufe} (DHI 1.0) in Aschaffenburg:"
+        return f"Gern, die nächsten Vollpräsenz-Termine{stufe} (DHI 1.0) in Aschaffenburg:"
     if kinds == {"hybrid"}:
-        return f"Gern — die nächsten Live-Online-Theorieblöcke{stufe} (DHI 2.0):"
+        return f"Gern, die nächsten Live-Online-Theorieblöcke{stufe} (DHI 2.0):"
     if f.get("stage"):
-        return f"Gern — die nächsten Termine für Stufe {f['stage']}:"
-    return "Gern — die nächsten passenden Termine:"
+        return f"Gern, die nächsten Termine für Stufe {f['stage']}:"
+    return "Gern, die nächsten passenden Termine:"
 
 
 def _outro(f: dict, treffer: list[dict], weitere: int) -> str:

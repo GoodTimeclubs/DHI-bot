@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="DHI Bot", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="DHI Bot", version="0.3.1", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -129,12 +129,12 @@ class ChatIn(BaseModel):
 def chat(body: ChatIn, request: Request):
     ip = _client_ip(request)
     if not _rate_ok(ip):
-        raise HTTPException(429, "Zu viele Anfragen — bitte kurz warten.")
+        raise HTTPException(429, "Zu viele Anfragen, bitte kurz warten.")
     if not _daily_ok():
         return {"reply": _LIMIT_REPLY, "sources": [], "mock": False}
     if not (DATA_DIR / "index.pkl").exists():
         return {
-            "reply": "Ich lade gerade die Website-Inhalte — bitte in etwa einer Minute "
+            "reply": "Ich lade gerade die Website-Inhalte, bitte in etwa einer Minute "
             "noch einmal versuchen.",
             "sources": [],
             "mock": MOCK_LLM,
@@ -143,7 +143,7 @@ def chat(body: ChatIn, request: Request):
         return llm.answer(body.message, body.history)
     except Exception as e:  # noqa: BLE001
         print(f"!! Chat-Fehler: {type(e).__name__}: {e}")
-        raise HTTPException(502, "Antwort derzeit nicht möglich — bitte später erneut versuchen.")
+        raise HTTPException(502, "Antwort derzeit nicht möglich, bitte später erneut versuchen.")
 
 
 @app.get("/api/health")

@@ -205,7 +205,7 @@
         if (history.length > 12) history.splice(0, history.length - 12);
       }
     } catch (e) {
-      wait.innerHTML = "Verbindung fehlgeschlagen — läuft der Bot-Server? (" + esc(String(e)) + ")";
+      wait.innerHTML = "Verbindung fehlgeschlagen, läuft der Bot-Server? (" + esc(String(e)) + ")";
     }
     busy = false;
     // Zum ANFANG der neuen Antwort scrollen, nicht ans Ende

@@ -146,3 +146,69 @@ def test_format_termine_nummeriert_chronologisch(monkeypatch):
     assert "05.01.2099" in zeilen[0]  # frühester Termin steht an Position 1
     assert "01.06.2099" in zeilen[1]
     assert stand == daten["fetched_at"]
+
+
+# ── Stilfilter: keine Gedankenstriche in Bot-Antworten (v0.3.1) ──────────────
+
+def test_prompt_verbietet_gedankenstriche():
+    t = llm.SYSTEM_TEMPLATE
+    assert "KEINE Gedankenstriche" in t                 # Regel 9 (FORMAT)
+    assert "Keine Gedankenstriche" in t                 # ERINNERUNG-Block
+    # Das Stilbeispiel lebt die Regel vor (Vorbildwirkung auf das Modell):
+    beispiel = t.split("STILBEISPIEL")[1].split("TERMINDATEN")[0]
+    assert "—" not in beispiel
+
+
+def test_filter_ersetzt_gedankenstriche_durch_komma():
+    f = llm._ohne_gedankenstriche
+    assert f("Wir sind da — gern auch persönlich.") == "Wir sind da, gern auch persönlich."
+    assert f("Wir sind da – gern auch persönlich.") == "Wir sind da, gern auch persönlich."
+    assert f("Ein Einschub—ohne Leerzeichen.") == "Ein Einschub, ohne Leerzeichen."
+    assert f("Der Kurs — auch DHI 1.0 genannt — startet bald.") == \
+        "Der Kurs, auch DHI 1.0 genannt, startet bald."
+
+
+def test_filter_erhaelt_bis_striche_in_daten_und_zahlen():
+    f = llm._ohne_gedankenstriche
+    assert f("Termin 05.01.–09.01.2099 in Aschaffenburg.") == \
+        "Termin 05.01.–09.01.2099 in Aschaffenburg."
+    assert f("Geöffnet 10 – 17 Uhr.") == "Geöffnet 10–17 Uhr."
+    assert f("Stufe 1+2 vom 21.09.—25.09.2026.") == "Stufe 1+2 vom 21.09.–25.09.2026."
+
+
+def test_filter_streicht_strich_nach_satzzeichen_und_am_rand():
+    f = llm._ohne_gedankenstriche
+    assert f("Am 21.09. – also bald.") == "Am 21.09. also bald."
+    assert f("— Erstens\n— Zweitens") == "- Erstens\n- Zweitens"
+    assert f("Ein Satz endet offen —\nNeue Zeile.") == "Ein Satz endet offen\nNeue Zeile."
+
+
+def test_answer_wendet_stilfilter_auf_jede_antwort_an(monkeypatch):
+    monkeypatch.setattr(llm, "MOCK_LLM", True)
+    monkeypatch.setattr(llm, "DETERMINISTIC_TERMINE", False)
+    monkeypatch.setattr(llm.retrieval, "search", lambda q, k=6: [])
+    monkeypatch.setattr(
+        llm, "_mock_reply",
+        lambda m, c: "Klar — das passt. Termin 05.01.–09.01.2099 — jetzt buchen.",
+    )
+    out = llm.answer("Testfrage?", [])
+    assert "—" not in out["reply"]
+    assert out["reply"].startswith("Klar, das passt.")
+    assert "05.01.–09.01.2099" in out["reply"]          # Bis-Strich bleibt
+
+
+def test_deterministische_terminantworten_sind_gedankenstrichfrei(monkeypatch):
+    import app.termine as termine
+    monkeypatch.setattr(llm, "DETERMINISTIC_TERMINE", True)
+    monkeypatch.setattr(
+        termine.retrieval, "get_termine",
+        lambda: {"seminars": [
+            {"kind": "practice", "stage": "1+2", "start": "2099-05-02",
+             "end": "2099-05-03", "location": "Stuttgart",
+             "url": "https://dhi2.de/s/d-hi/test", "id": "t1", "title": "Übungstage"},
+        ], "notes": [], "fetched_at": "2099-01-01T00:00:00+00:00"},
+    )
+    out = llm.answer("Welche Übungstage gibt es in Stuttgart?", [])
+    assert out.get("deterministic") is True
+    assert "—" not in out["reply"]
+    assert "02.05.–03.05.2099" in out["reply"]          # Bis-Strich im Datum bleibt
