@@ -1,8 +1,9 @@
-# DHI Bot (v0.2.3)
+# DHI Bot (v0.3.0)
 
-Chat-Assistent für **deutsches-hypnoseinstitut.de**: beantwortet Besucherfragen zu
-Website-Inhalten, Ausbildungen, tagesaktuellen Terminen und zur Buchung —
-auf Basis eines täglichen Website-Crawls und der Claude API.
+Chat-Assistent für **deutsches-hypnoseinstitut.de** und alle DHI-Subdomains:
+beantwortet Besucherfragen zu Website-Inhalten, Ausbildungen, dem
+Praxen-Netzwerk, tagesaktuellen Terminen und zur Buchung — auf Basis eines
+täglichen Website-Crawls und der Claude API.
 
 ## Architektur
 
@@ -10,7 +11,7 @@ auf Basis eines täglichen Website-Crawls und der Claude API.
 Besucher → widget.js (Chat) → Caddy (HTTPS) → FastAPI /api/chat → BM25-Retrieval → Claude API
                                                         ▲    └→ reine Terminlistenfragen:
      täglicher Crawl (03:10 Uhr) ───────────────────────┘       deterministisch aus termine.json
-     ├─ Sitemap: Hauptdomain + hybrid. + experte.               (app/termine.py, ohne LLM)
+     ├─ Sitemap: Hauptdomain + 10 Subdomains (Liste s.u.)       (app/termine.py, ohne LLM)
      ├─ Termine: assets/js/dhi-seminarkalender.js (strukturiert geparst)
      └─ Buchungsseiten: dhi2.de (Ablefy) — Preise, Raten, Restplätze
 ```
@@ -23,6 +24,37 @@ API-Kosten. Das Gating ist bewusst konservativ: Preise, Buchung, unbekannte
 Wunsch-Orte („… in Frankfurt?"), Konzept- und Folgefragen laufen weiter über das
 LLM, das Alternativen und Beratung anbieten kann. Abschaltbar per
 `DETERMINISTIC_TERMINE=0`.
+
+## Erfasste Domains
+
+Der tägliche Crawl liest die Hauptdomain und alle DHI-Subdomains ein
+(änderbar per `CRAWL_DOMAINS` in der `.env`):
+
+| Domain | Inhalt |
+|---|---|
+| deutsches-hypnoseinstitut.de | Institut, Ausbildungen, Hypnosewissen, FAQ, Seminarkalender |
+| lars.… | Lars Gutzeit — Vita, Hypnose, Coaching, Autor & Medien |
+| nautilus-code.… | Der Nautilus-Code (vierstufiges Hypnoseprotokoll) |
+| hypnospathie.… | Hypnospathie — Ethik, Wissensdatenbank, Hypnotiseurverzeichnis |
+| hypnosepraxis-aschaffenburg.… | DHI Hypnosepraxis Aschaffenburg |
+| hypnosepraxis-berlin.… | DHI Hypnosepraxis Berlin |
+| hypnosepraxis-oberstaufen.… | DHI Hypnosepraxis Oberstaufen-Steibis |
+| praxen.… | Überblick über das DHI-Praxen-Netzwerk |
+| hybrid.… | DHI 2.0 Live-Hybrid |
+| experte.… | Experten |
+| legal.… | Rechtliches — hier erscheinen später die neuen AGB |
+
+Dazu kommen wie bisher der Seminarkalender (`dhi-seminarkalender.js`) und die
+sechs Ablefy-Buchungsseiten auf dhi2.de.
+
+Noch unbefüllte Subdomains sind unkritisch: Hoster-Platzhalterseiten (z.B. die
+Hostinger-Default-Seite, die legal.… bis zum Einstellen der AGB zeigt) erkennt
+der Crawler und hält sie aus dem Index — sobald dort echte Inhalte liegen,
+nimmt der nächste tägliche Crawl sie automatisch auf. Fällt eine Subdomain
+aus, läuft der Crawl mit den übrigen Domains weiter. Inhaltsgleiche Duplikate
+(`…/index.html`-Zwillinge, URL-Query-Varianten wie `praxen.…/?bereich=…`,
+Soft-404-Seiten) werden beim Crawl automatisch übersprungen, damit sie die
+Suchtreffer nicht verwässern.
 
 ## Schnellstart (Docker)
 
@@ -71,6 +103,10 @@ docker compose up
 - `ANTHROPIC_MODEL` — Standard: `claude-haiku-4-5-20251001` (günstig/schnell)
 - `CRAWL_ON_START` — `auto` (Standard) | `always` | `never`
 - `CRAWL_HOUR` — Stunde des täglichen Re-Crawls (Europe/Berlin)
+- `CRAWL_DOMAINS` — erfasste Domains, kommagetrennt (Standard: alle 11
+  DHI-Domains, siehe „Erfasste Domains")
+- `MAX_PAGES` — Obergrenze Seiten pro Crawl-Lauf (Standard 600; der volle
+  Crawl hat Stand 01.08.2026 ~570 Seiten)
 - `DETERMINISTIC_TERMINE` — `1` (Standard): reine Terminlistenfragen deterministisch
   aus `termine.json` beantworten statt per LLM-Auswahl (QS-Befund 8); `0` = aus
 - `ALLOWED_ORIGINS` — für den Produktivbetrieb auf die Website-Domains einschränken
@@ -81,7 +117,8 @@ docker compose up
 
 1. Bot auf einem VPS deployen: DNS der Bot-Subdomain auf den Server zeigen lassen und
    `DOMAIN=bot.…` in der `.env` setzen — der mitlaufende Caddy übernimmt HTTPS automatisch.
-2. `ALLOWED_ORIGINS=https://deutsches-hypnoseinstitut.de,...` setzen.
+2. `ALLOWED_ORIGINS` auf alle Domains setzen, auf denen das Widget eingebunden
+   wird (Hauptdomain + Subdomains).
 3. Der Website-Betreiber ergänzt vor `</body>`:
    `<script src="https://BOT-DOMAIN/widget.js" data-api="https://BOT-DOMAIN" defer></script>`
 4. Datenschutzerklärung ergänzen (siehe Umsetzungsplan im Projekt).
@@ -90,12 +127,19 @@ docker compose up
 
 Drei Test-Ebenen liegen unter `tests/` (Einrichtung: `pip install -r requirements-dev.txt`):
 
-0. **Unit-Tests Terminfilter** — `pytest tests/test_termine.py` prüft ohne Server
-   und ohne API-Key, dass deterministische Terminantworten nie den frühesten
-   passenden Termin auslassen und dass Beratungs-, Preis- und Frankfurt-Fragen
-   weiterhin an das LLM gehen.
+0. **Unit-Tests** — `pytest tests/test_termine.py tests/test_crawler.py
+   tests/test_llm.py tests/test_retrieval.py` prüft
+   ohne Server, ohne API-Key und ohne Internet: deterministische
+   Terminantworten lassen nie den frühesten passenden Termin aus (Beratungs-,
+   Preis- und Frankfurt-Fragen gehen weiter ans LLM); alle 11 DHI-Domains
+   stehen im Standard-Crawl, die Platzhalter-Erkennung greift (und lässt
+   künftige echte legal-Inhalte durch), Sitemap-Parsing inkl. Sitemap-Index
+   und gzip funktioniert; der System-Prompt enthält die Kernregeln
+   (Link-Pflichten, Preis-Trennung, Praxen-Baustein), der PREISDATEN-Block
+   erfasst auch neue Ablefy-Produkte, und das Retrieval boostet
+   Buchungsseiten bei Ausbildungs- (nicht aber bei Sitzungs-)Preisfragen.
 
-1. **Testkatalog** — 36 Beispielfragen mit Soll-Verhalten (Inhalte, Termine, Preise,
+1. **Testkatalog** — 49 Beispielfragen mit Soll-Verhalten (Inhalte, Termine, Preise,
    Buchung, Grenzfälle wie Gesundheitsfragen, Heilversprechen, Off-Topic,
    Prompt-Injection) in `tests/testkatalog.yaml`. Der Runner prüft jede Antwort
    automatisch (Sie-Form, Formatierung, Links, WhatsApp-Nummer, Termine gegen
@@ -134,9 +178,11 @@ Ergebnisse und behobene Befunde des QS-Laufs vom 30.07.2026: siehe
   Anthropic-Console setzen.
 - **Netztrennung**: Der Bot läuft in einem internen Docker-Backend-Netz und veröffentlicht
   keine Ports — von außen ist nur Caddy (Ports 80/443) erreichbar.
-- **Container läuft als non-root** (User `botuser`, UID 10001). Auf einem Linux-Host braucht
-  das Daten-Volume einmalig Schreibrecht: `sudo chown -R 10001 data/` (unter Docker Desktop
-  für Windows/Mac nicht nötig).
+- **Container läuft als non-root** (User `botuser`, UID 10001). Die Crawl-Daten liegen
+  deshalb in einem benannten Docker-Volume (`bot_data`) statt in einem Bind-Mount:
+  Windows-Bind-Mounts erscheinen im Container ohne Schreibrecht für botuser — der
+  Crawl scheiterte dort mit PermissionError. Inhalt ansehen:
+  `docker compose exec dhi-bot cat /app/data/meta.json`
 - **XSS-Schutz im Widget** (HTML-Escaping + Shadow DOM), API-Key nur serverseitig in `.env`,
   Chats werden serverseitig nicht gespeichert.
 - **Produktiv-Checkliste**: `DOMAIN` in `.env` setzen (HTTPS übernimmt der mitlaufende Caddy),
@@ -145,7 +191,8 @@ Ergebnisse und behobene Befunde des QS-Laufs vom 30.07.2026: siehe
 
 ## Bewusste Grenzen des Prototyps
 
-- BM25-Volltextsuche statt Embeddings (bei ~40 Seiten völlig ausreichend; Embeddings
+- BM25-Volltextsuche statt Embeddings (auch bei einigen hundert Seiten gut
+  brauchbar; Embeddings
   lassen sich später in `indexer.py`/`retrieval.py` ergänzen).
 - Chats werden **nicht gespeichert** (nur flüchtig im Browser-Tab) — datenschutzfreundlich.
 - Rate-Limit in-memory (20 Nachrichten / 5 Min / IP).

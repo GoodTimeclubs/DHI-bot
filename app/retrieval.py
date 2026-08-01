@@ -55,6 +55,13 @@ def get_pages() -> list[dict]:
 _PRICE_HINTS = ("preis", "kost", "teuer", "rate", "zahl", "skonto", "rabatt",
                 "euro", "€", "gebühr", "gebuehr", "investition", "finanzier")
 
+# … außer es geht erkennbar um Einzelsitzungen/Coaching in den DHI-Hypnosepraxen:
+# deren Preise stehen auf den Praxis-Seiten (source "website"), nicht auf den
+# Ausbildungs-Buchungsseiten — der Boost würde sonst Ausbildungspreise in
+# Sitzungspreis-Antworten drängen.
+_SESSION_HINTS = ("sitzung", "coaching", "behandl", "klient", "hypnosepraxis",
+                  "praxen", "therapie")
+
 
 def search(query: str, k: int = 6) -> list[dict]:
     index = _load_index()
@@ -63,7 +70,7 @@ def search(query: str, k: int = 6) -> list[dict]:
     chunks = index["chunks"]
     scores = list(index["bm25"].get_scores(tokenize(query)))
     q = query.lower()
-    price_q = any(h in q for h in _PRICE_HINTS)
+    price_q = any(h in q for h in _PRICE_HINTS) and not any(h in q for h in _SESSION_HINTS)
     if price_q:
         for i, c in enumerate(chunks):
             if c.get("source") == "buchungsseite":

@@ -1,7 +1,10 @@
-"""Crawler für deutsches-hypnoseinstitut.de.
+"""Crawler für deutsches-hypnoseinstitut.de samt aller Subdomains.
 
 Erfasst:
-  1. Alle Seiten der Hauptdomain + Subdomains (per Sitemap, Fallback: Link-Crawl)
+  1. Alle Seiten der Domains aus config.CRAWL_DOMAINS (Hauptdomain + 10
+     Subdomains; per Sitemap, Fallback: Link-Crawl). Hoster-Platzhalterseiten
+     noch unbefüllter Subdomains (z.B. legal.… bis zum Einstellen der neuen
+     AGB) werden erkannt und übersprungen.
   2. Die Termindaten aus assets/js/dhi-seminarkalender.js (strukturiert)
   3. Die Ablefy-Buchungsseiten auf dhi2.de (Preise, Raten, Restplätze)
 
@@ -26,13 +29,17 @@ from xml.etree import ElementTree
 import httpx
 from bs4 import BeautifulSoup
 
-from .config import DATA_DIR, FIXTURES_DIR, REQUEST_DELAY
+from .config import (
+    CRAWL_DOMAINS,
+    DATA_DIR,
+    FIXTURES_DIR,
+    MAIN_DOMAIN,
+    MAX_PAGES,
+    REQUEST_DELAY,
+)
 
-MAIN = "deutsches-hypnoseinstitut.de"
-DOMAINS = [MAIN, f"hybrid.{MAIN}", f"experte.{MAIN}"]
-KALENDER_PAGE = f"https://{MAIN}/seminarkalender.html"
-HEADERS = {"User-Agent": "DHI-Bot/0.1 (Website-Assistent, Testbetrieb)"}
-MAX_PAGES = 120
+KALENDER_PAGE = f"https://{MAIN_DOMAIN}/seminarkalender.html"
+HEADERS = {"User-Agent": "DHI-Bot/0.3 (Website-Assistent, Testbetrieb)"}
 
 SKIP_PATTERNS = [
     re.compile(r"/old/"),
@@ -46,12 +53,19 @@ def _skip(url: str) -> bool:
 
 
 def _norm(url: str) -> str:
-    """URL normalisieren: Fragment weg, www. vereinheitlichen."""
+    """URL normalisieren: Fragment + Query weg, www. vereinheitlichen.
+
+    Query-Parameter tragen auf diesen statischen Seiten keinen eigenen Inhalt
+    (praxen.…/?bereich=…&leistung=… liefert immer die Startseite, der
+    Seminarkalender nur eine Filteransicht) — sie erzeugten im ersten
+    Voll-Crawl ~60 inhaltsgleiche Duplikate. Die Kalender-JS-URL mit ?v=
+    ist nicht betroffen (wird direkt geladen, ohne _norm).
+    """
     url = url.split("#", 1)[0].strip()
     p = urlparse(url)
     host = p.netloc.lower().removeprefix("www.")
     path = p.path or "/"
-    return f"https://{host}{path}" + (f"?{p.query}" if p.query else "")
+    return f"https://{host}{path}"
 
 
 def _get(client: httpx.Client, url: str) -> httpx.Response | None:
@@ -63,6 +77,29 @@ def _get(client: httpx.Client, url: str) -> httpx.Response | None:
     except Exception as e:  # noqa: BLE001
         print(f"  ! Fehler {type(e).__name__}: {url}")
     return None
+
+
+# ── Platzhalter-Erkennung ────────────────────────────────────────────────────
+# Noch unbefüllte Subdomains (z.B. legal.… bis zum Einstellen der neuen AGB)
+# liefern die Default-Seite des Hosters mit Status 200 — solcher Inhalt darf
+# nicht in den Index. Die Marker sind bewusst spezifisch gewählt, damit z.B.
+# eine künftige Datenschutzerklärung, die den Hoster nur namentlich nennt,
+# niemals fälschlich aussortiert wird.
+PLACEHOLDER_TITLES = {"default page", "index of /"}
+PLACEHOLDER_MARKERS = (
+    "you are all set to go",
+    "hpanel.hostinger.com",
+    "this domain is parked",
+    "website is under construction",
+)
+
+
+def is_placeholder_page(title: str, text: str) -> bool:
+    t = (title or "").strip().lower()
+    if t in PLACEHOLDER_TITLES:
+        return True
+    probe = f"{t}\n{(text or '')[:2000].lower()}"
+    return any(m in probe for m in PLACEHOLDER_MARKERS)
 
 
 # ── Sitemap ──────────────────────────────────────────────────────────────────
@@ -191,20 +228,22 @@ def fetch_kalender(client: httpx.Client) -> dict:
 
 def crawl_pages(client: httpx.Client) -> tuple[list[dict], dict]:
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    domains = set(CRAWL_DOMAINS)
     queue: list[str] = []
-    for d in DOMAINS:
+    for d in CRAWL_DOMAINS:
         found = sitemap_urls(client, d)
         print(f"Sitemap {d}: {len(found)} URLs")
         queue += found or [f"https://{d}/"]
 
     pages: list[dict] = []
     seen: set[str] = set()
+    seen_text: set[int] = set()  # Inhalts-Duplikate (/index.html-Zwillinge, Soft-404s)
     i = 0
     while i < len(queue) and len(pages) < MAX_PAGES:
         url = _norm(queue[i])
         i += 1
         host = urlparse(url).netloc
-        if url in seen or _skip(url) or host not in DOMAINS:
+        if url in seen or _skip(url) or host not in domains:
             continue
         seen.add(url)
         r = _get(client, url)
@@ -212,14 +251,27 @@ def crawl_pages(client: httpx.Client) -> tuple[list[dict], dict]:
         if r is None or "text/html" not in r.headers.get("content-type", "text/html"):
             continue
         page, links = extract_page(url, r.text)
+        if is_placeholder_page(page["title"], page["text"]):
+            print(f"  ~ Platzhalter übersprungen (Domain noch unbefüllt): {url}")
+            continue
+        th = hash(page["text"])
+        if th in seen_text:
+            print(f"  ~ Duplikat übersprungen (Inhalt bereits erfasst): {url}")
+            continue
+        seen_text.add(th)
         page.update(source="website", fetched_at=now)
         pages.append(page)
         print(f"  ✓ {url} ({len(page['text'])} Zeichen)")
         # Fallback-Linkcrawl (falls Sitemap unvollständig)
         for link in links:
             n = _norm(link) if link.startswith(("http", "/")) else ""
-            if n and urlparse(n).netloc in DOMAINS and n not in seen and not _skip(n):
+            if n and urlparse(n).netloc in domains and n not in seen and not _skip(n):
                 queue.append(n)
+
+    if len(pages) >= MAX_PAGES:
+        rest = {u for u in (_norm(q) for q in queue[i:]) if u not in seen and not _skip(u)}
+        if rest:
+            print(f"  ! Seitenlimit MAX_PAGES={MAX_PAGES} erreicht — {len(rest)} URLs nicht geholt")
 
     kalender = fetch_kalender(client)
     if kalender.get("seminars"):
@@ -287,10 +339,15 @@ def run(from_fixtures: bool = False) -> dict:
     (DATA_DIR / "termine.json").write_text(
         json.dumps(kalender, ensure_ascii=False, indent=1), encoding="utf-8"
     )
+    pro_domain: dict[str, int] = {}
+    for p in pages:
+        host = urlparse(p["url"]).netloc
+        pro_domain[host] = pro_domain.get(host, 0) + 1
     meta = {
         "pages": len(pages),
         "termine": len(kalender.get("seminars", [])),
         "mode": "fixtures" if from_fixtures else "live",
+        "pages_pro_domain": dict(sorted(pro_domain.items())),
         "finished_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     (DATA_DIR / "meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")

@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="DHI Bot", version="0.2.3", lifespan=lifespan)
+app = FastAPI(title="DHI Bot", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

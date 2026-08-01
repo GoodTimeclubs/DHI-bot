@@ -7,7 +7,13 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data:/app/data
+      # Benanntes Volume statt Bind-Mount: Windows-Bind-Mounts (A:\…) erscheinen
+      # im Container root-eigen ohne Schreibrecht für botuser (UID 10001) —
+      # der Crawl scheiterte dort mit PermissionError beim Schreiben von
+      # pages.json. Das Volume übernimmt beim ersten Start automatisch die
+      # botuser-Rechte aus dem Image (Dockerfile chownt /app/data).
+      # Inhalt ansehen:  docker compose exec dhi-bot cat /app/data/meta.json
+      - bot_data:/app/data
     networks:
       - backend
     restart: unless-stopped
@@ -44,3 +50,4 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  bot_data:
