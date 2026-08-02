@@ -62,6 +62,14 @@ def test_prompt_enthaelt_kernregeln():
         "Übungsstandorte verfügbar, dort aber OHNE feste Termine",
         # 4. Rückfrage statt raten (Ausbildung oder Praxis?)
         "12. RÜCKFRAGE STATT RATEN",
+        # ── QS-Lauf 02.08.2026 (50/59): Regel 12 hatte sich verselbständigt ──
+        # Der Bot fragte auch nach Stufe, Format und Kursart zurück, statt zu
+        # antworten (C4, C5, C8, C9, H1, H2, F5) — und ließ in Rückfragen den
+        # Buchungslink weg (C4, C5, C8, C9, H3). Beides ist jetzt ausgeschlossen.
+        "der EINZIGE erlaubte Grund für eine Rückfrage",
+        "nicht nach der Stufe",
+        "nenne kurz beide Varianten mit ihrem jeweiligen Betrag, statt zu fragen",
+        "Eine Preis- oder Buchungsantwort ganz ohne Link ist immer falsch",
         # 5. Skepsis: Beratungsgespräch anbieten
         "13. SKEPSIS ERNST NEHMEN",
         "ohne Verkaufsdruck",

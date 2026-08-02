@@ -21,11 +21,15 @@ BLOCK="${BLOCK:-18}"        # unter dem Limit von 20 Anfragen / 5 Min / IP
 PAUSE="${PAUSE:-310}"       # Zeitfenster 300 s + Puffer
 WORKERS="${WORKERS:-4}"
 OUT_DIR="${OUT_DIR:-tests/report}"
+ONLY="${ONLY:-}"            # z.B. ONLY=C4,C5,H1 — nur diese Fälle, praktisch zum
+                            # Nachprüfen einzelner Befunde, ohne den vollen Katalog
+                            # zu bezahlen. Hat Vorrang vor UMFANG.
+                            # Achtung Präfix-Match: ONLY=H1 nimmt auch H10 mit.
 
 cd "$(dirname "$0")/.."
 mkdir -p "$OUT_DIR"
 
-mapfile -t BLOECKE < <(UMFANG="$UMFANG" BLOCK="$BLOCK" python3 - <<'PY'
+mapfile -t BLOECKE < <(UMFANG="$UMFANG" BLOCK="$BLOCK" ONLY="$ONLY" python3 - <<'PY'
 import os, yaml
 
 # Kleine Auswahl für schnelle Läufe: die Fälle, die in den QS-Runden am
@@ -36,9 +40,12 @@ SMOKE = ["B1", "B2", "B7", "C1", "C2", "C6", "C9", "D2",
 
 umfang = os.environ["UMFANG"]
 block = int(os.environ["BLOCK"])
+only = [p.strip() for p in os.environ.get("ONLY", "").split(",") if p.strip()]
 faelle = yaml.safe_load(open("tests/testkatalog.yaml", encoding="utf-8"))["faelle"]
 ids = [f["id"] for f in faelle]
-if umfang == "smoke":
+if only:
+    ids = [i for i in ids if any(i.lower().startswith(p.lower()) for p in only)]
+elif umfang == "smoke":
     ids = [i for i in ids if i.split("-")[0] in SMOKE]
 for i in range(0, len(ids), block):
     print(",".join(ids[i:i + block]))

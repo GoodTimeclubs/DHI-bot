@@ -213,8 +213,17 @@ IP-Rotation des Testrunners läuft dort also ins Leere (daher `--no-xff`), und
 ein Runner ist genau eine IP.
 
 `scripts/qs_live.sh` teilt den Katalog deshalb in Blöcke zu 18 Fällen mit
-310 Sekunden Pause: 49 Fälle ≈ 12 Minuten. Über `BLOCK`, `PAUSE` und
-`WORKERS` lässt sich das anpassen, wenn sich das Rate-Limit ändert.
+310 Sekunden Pause. Über `BLOCK`, `PAUSE` und `WORKERS` lässt sich das
+anpassen, wenn sich das Rate-Limit ändert.
+
+Einzelne Fälle nachprüfen, ohne den ganzen Katalog zu bezahlen — z.B. nach
+einer Prompt-Änderung nur die zuletzt gescheiterten Fälle (Präfix-Match,
+`H1` nimmt also auch `H10` mit):
+
+```bash
+BASE_URL=https://bot.deutsches-hypnoseinstitut.de \
+ONLY=C4,C5,C8,C9,E3,F5,H1,H2,H3 bash scripts/qs_live.sh
+```
 
 ### Woher die Solldaten für die Terminprüfungen kommen
 
