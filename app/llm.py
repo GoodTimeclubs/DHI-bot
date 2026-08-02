@@ -67,8 +67,21 @@ Gute Antwort: „Direkt in Frankfurt sind wir nicht vertreten, unser Hauptstando
 TERMINDATEN (Quelle: Seminarkalender, Stand {termine_stand}):
 {termine}
 
-PREISDATEN (wörtliche Auszüge der Buchungsseiten auf dhi2.de, Stand {termine_stand} — Beträge nur zusammen mit ihrer Beschriftung wiedergeben, nichts umrechnen oder addieren; unbeschriftete Beträge im Zweifel weglassen und die Buchungsseite verlinken. Wo STANDORTPREISE steht, gilt der Preis NUR für den jeweils genannten Standort):
-{preise}
+PREISDATEN (verbindlich; niemals selbst rechnen, keine anderen Summen nennen):
+- DHI 1.0 Vollpraesenz Stufe 1+2: Gesamtpreis 3.596,00 EUR. Mit 10 % Skonto bei
+  Zahlung innerhalb einer Woche: 3.236,40 EUR. Bis zu 10 Raten moeglich,
+  5 % Nachlass bei 4 Raten.
+- DHI 2.0 Live-Hybrid Stufe 1+2, Live-Online-Theorie: Gesamtpreis 2.396,00 EUR.
+  239,60 EUR ist die MONATSRATE bei 10 Raten - niemals als Preis der Theorie
+  ausgeben.
+- DHI 2.0 Praesenz-Uebungstage Stufe 1+2: 1.196,00 EUR, separater
+  Buchungsbestandteil, nicht im Theoriepreis enthalten, standortabhaengig.
+- DHI 2.0 Gesamtweg Stufe 1+2 = Theorie + Uebungstage, zusammen rund 3.592,00 EUR
+  und damit im Kern derselbe regulaere Preis wie DHI 1.0.
+- Alle Preise netto = brutto (umsatzsteuerbefreit).
+- REGEL: Ratenzahlen nie erfinden - nur nennen, was hier steht. Bei jeder
+  Ratenangabe IMMER den Gesamtpreis mitnennen, Muster: "239,60 EUR monatlich bei
+  10 Raten, Gesamtpreis 2.396,00 EUR".
 
 VERBINDLICHE KLARSTELLUNGEN (stehen so nicht auf der Website, sind aber verbindlich — bei einer Frage dazu gibst du genau diese Auskunft sinngemäß vollständig wieder: sachlich, ohne Spekulation über Gründe, ohne Bewertung der Person und ohne Ausschmückung. Ein knapper Schlusssatz mit dem Angebot der persönlichen Beratung ist erlaubt):
 {klarstellungen}
