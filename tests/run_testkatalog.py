@@ -11,6 +11,11 @@ Optionen:
     --workers 4       parallele Anfragen
     --no-xff          keine X-Forwarded-For-Rotation (dann greift das
                       Rate-Limit von 20 Anfragen / 5 Min pro IP!)
+    --test-token T    Header X-DHI-Test mitschicken (auch per DHI_TEST_TOKEN in
+                      der Umgebung). Der Server beantwortet solche Anfragen dann
+                      über seinen getrennten QS-API-Key: eigenes Guthaben, kein
+                      Verbrauch der Produktivmittel, kein Tages- und kein
+                      IP-Rate-Limit (der Katalog läuft damit ohne Pausen durch).
     --out PREFIX      Berichtspfade (Default tests/report/<Zeitstempel>)
 
 Exit-Code 0 = alle harten Checks bestanden, 1 = mindestens ein FAIL.
@@ -20,6 +25,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import json
+import os
 import re
 import sys
 import time
@@ -194,8 +200,14 @@ def check_fall(fall: dict, reply: str, urls: list[str], termine: dict) -> list[d
 
 # ── Anfrage ─────────────────────────────────────────────────────────────────
 
-def ask(base_url: str, frage: str, xff: str | None, timeout: float = 90) -> dict:
+def ask(base_url: str, frage: str, xff: str | None, timeout: float = 90,
+        test_token: str = "") -> dict:
     headers = {"X-Forwarded-For": xff} if xff else {}
+    # Mit Test-Token beantwortet der Server die Anfrage über den getrennten
+    # QS-Schlüssel (ANTHROPIC_API_KEY_TEST) — das Produktivguthaben bleibt
+    # unberührt, Tages- und Rate-Limit greifen nicht.
+    if test_token:
+        headers["X-DHI-Test"] = test_token
     last_err = None
     for versuch in (1, 2):
         try:
@@ -220,6 +232,7 @@ def main() -> int:
     ap.add_argument("--only", default="")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--no-xff", action="store_true")
+    ap.add_argument("--test-token", default=os.environ.get("DHI_TEST_TOKEN", ""))
     ap.add_argument("--out", default="")
     args = ap.parse_args()
 
@@ -241,12 +254,22 @@ def main() -> int:
           f"chunks={health.get('chunks')} termine={health.get('termine')}")
     if health.get("mock_mode"):
         print("!! ACHTUNG: Server läuft im Mock-Modus — Antwortqualität wird NICHT geprüft.")
+    if args.test_token:
+        if not health.get("test_key_configured"):
+            print("!! Server meldet keinen getrennten QS-Schlüssel (test_key_configured: false) — "
+                  "der Lauf würde abgewiesen. ANTHROPIC_API_KEY_TEST und TEST_TOKEN auf dem "
+                  "Server setzen.")
+            return 1
+        print("QS-Schlüssel: getrennt (Produktivguthaben bleibt unberührt)")
+    else:
+        print("!! Kein Test-Token gesetzt — dieser Lauf geht auf das PRODUKTIVGUTHABEN "
+              "und zählt gegen das Tageslimit. Mit --test-token bzw. DHI_TEST_TOKEN trennen.")
 
     def run_one(i_fall):
         i, fall = i_fall
         xff = None if args.no_xff else f"203.0.113.{(i % 200) + 1}"
         t0 = time.time()
-        resp = ask(args.base_url, fall["frage"], xff)
+        resp = ask(args.base_url, fall["frage"], xff, test_token=args.test_token)
         dauer = time.time() - t0
         if "error" in resp:
             return {**fall, "reply": "", "sources": [], "dauer_s": round(dauer, 1),

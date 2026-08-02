@@ -132,6 +132,20 @@ TEMPERATURE = float(os.getenv("TEMPERATURE", "0.3"))
 # Mock-Modus: ohne API-Key antwortet der Bot mit gefundenen Quellen statt LLM-Text
 MOCK_LLM = os.getenv("MOCK_LLM", "").lower() in ("1", "true", "yes") or not ANTHROPIC_API_KEY
 
+# ── Getrennter Key für QS-Läufe ──────────────────────────────────────────────
+# Der Testkatalog stellt echte Chat-Anfragen an den Live-Bot (59 Fälle, davon 53
+# ans Modell). Liefen die über den Produktivschlüssel, ginge jeder QS-Lauf vom
+# selben Guthaben ab, aus dem echte Besucher bedient werden — und wäre es leer,
+# verstummte der Bot auf allen Domains. Deshalb ein zweiter Schlüssel mit
+# eigenem Guthaben und eigenem Spend-Limit.
+# Anfragen mit dem Header `X-DHI-Test: <TEST_TOKEN>` laufen über diesen Key,
+# zählen nicht gegen DAILY_MESSAGE_LIMIT und nicht gegen das IP-Rate-Limit.
+# Beide Werte gehören zusammen: Ohne TEST_TOKEN gibt es keinen Zugang zum
+# Testpfad, ohne ANTHROPIC_API_KEY_TEST antwortet er mit 503 statt still auf
+# den Produktivschlüssel auszuweichen.
+ANTHROPIC_API_KEY_TEST = os.getenv("ANTHROPIC_API_KEY_TEST", "").strip()
+TEST_TOKEN = os.getenv("TEST_TOKEN", "").strip()
+
 # Reine Terminlistenfragen deterministisch aus termine.json beantworten statt
 # per LLM-Auswahl (QS-Befund 8: Modell ließ selten den frühesten Termin aus).
 # 0 = abschalten, dann beantwortet wieder das LLM alle Terminfragen.

@@ -134,6 +134,7 @@ ssh-keyscan -t ed25519,rsa <server>
 | `VPS_SSH_KEY` | Inhalt von `~/.ssh/dhi-deploy` | **privater** Schlüssel, mit `-----BEGIN…`- und `-----END…`-Zeile |
 | `VPS_KNOWN_HOSTS` | Ausgabe von `ssh-keyscan` | |
 | `VPS_PORT` | `22` | optional, nur bei abweichendem Port |
+| `QS_TEST_TOKEN` | derselbe Wert wie `TEST_TOKEN` in der Server-`.env` | trennt den QS-Lauf vom Produktivguthaben (Abschnitt 5) |
 
 **Settings → Secrets and variables → Actions → Variables** (optional, alles hat
 sinnvolle Vorgaben):
@@ -188,9 +189,28 @@ cd /opt/dhi-bot && git reset --hard <commit> && docker compose up -d --build
 
 ## 5 · Was das kostet
 
-Der QS-Testkatalog stellt echte Chat-Anfragen an den Live-Bot — mit
-Retrieval-Kontext liegt ein Volllauf grob bei **20–30 Cent**, der
-Smoke-Umfang bei **rund 8 Cent** (Haiku-Preise, abhängig von der Kontextgröße).
+Der QS-Testkatalog stellt echte Chat-Anfragen an den Live-Bot. Nachgerechnet
+am Lauf vom 02.08.2026 (59 Fälle, davon 6 deterministisch aus `termine.py`
+beantwortet und damit kostenlos → **53 API-Anfragen**):
+
+| | |
+|---|---|
+| System-Prompt je Anfrage | ~29.600 Zeichen ≈ **8.500 Token** (Regeln, TERMINDATEN, PREISDATEN, KLARSTELLUNGEN, 6 Website-Auszüge) |
+| Antworten, alle 53 zusammen | ~27.900 Zeichen ≈ 8.000 Token |
+| Input × $1/MTok | ~$0,45 |
+| Output × $5/MTok | ~$0,04 |
+| **Volllauf gesamt** | **≈ US$ 0,50** (Spanne 0,45–0,56 je nach Tokenisierung) |
+| Smoke-Umfang (15 Fälle, 12 davon per API) | ≈ US$ 0,11 |
+| Nachprüfung einzelner Fälle via `ONLY` (10 Fälle) | ≈ US$ 0,09 |
+
+Rund 92 % davon ist der System-Prompt, der bei jeder Anfrage komplett neu
+bezahlt wird. Zum Vergleich der Live-Betrieb: eine Besucher-Nachricht kostet
+nach derselben Rechnung **rund 1 US-Cent** — bei `DAILY_MESSAGE_LIMIT=1000`
+sind das im Extremfall ~9 US$ an einem Tag.
+
+Die Token-Zahlen sind aus Zeichenlängen hochgerechnet (deutscher Text, 3,2–3,8
+Zeichen je Token); der exakte Verbrauch steht in der Anthropic Console unter
+Usage.
 
 Das ist der Punkt, an dem die Pipeline mit dem offenen ToDo „API-Guthaben"
 kollidiert: Am 01.08.2026 lagen **US$ 0,07** auf dem Konto. In dem Zustand
@@ -198,6 +218,48 @@ kann schon ein einziger Volllauf das Guthaben aufbrauchen — und dann
 antwortet der **Live-Bot auf allen Domains nicht mehr**. Also erst
 automatisches Aufladen und ein Spend-Limit einrichten, und bis dahin
 `QS_UMFANG=aus` oder `smoke` setzen.
+
+Wer den Volllauf billiger will: Der System-Prompt ist bis zum Block
+WEBSITE-AUSZÜGE bei jeder Anfrage identisch. Ein Cache-Breakpoint davor
+(Prompt-Caching, Cache-Treffer kosten 10 % des Input-Preises) würde den
+Volllauf grob halbieren. Für den Live-Betrieb lohnt sich das dagegen nur bei
+dichtem Verkehr — bei verstreuten Besucheranfragen läuft der Cache ab, und
+Cache-Schreibvorgänge kosten 25 % mehr als normaler Input.
+
+### Getrennter API-Schlüssel für QS-Läufe
+
+Damit ein Testlauf nie das Guthaben aufbraucht, aus dem echte Besucher bedient
+werden, läuft der Katalog über einen **zweiten Anthropic-Schlüssel**. Drei
+Schritte, einmalig:
+
+1. In der Anthropic Console einen zweiten API-Key anlegen (eigenes Spend-Limit
+   setzen — das ist der eigentliche Schutz) und ein Passwort für den Zugang
+   würfeln: `openssl rand -hex 24`
+2. Auf dem VPS in die `.env`, danach `docker compose up -d`:
+
+   ```bash
+   ANTHROPIC_API_KEY_TEST=sk-ant-…      # zweiter Key, eigenes Guthaben
+   TEST_TOKEN=<gewürfelter Wert>        # Zugang zum Testpfad
+   ```
+
+3. Denselben `TEST_TOKEN`-Wert als Environment-Secret **`QS_TEST_TOKEN`** in
+   GitHub hinterlegen.
+
+Wie es funktioniert: Der Testrunner schickt den Header `X-DHI-Test: <TEST_TOKEN>`.
+Anfragen mit gültigem Token beantwortet der Bot über den zweiten Schlüssel,
+zählt sie getrennt (`test_messages_today` in `/api/health`) und nimmt sie von
+`DAILY_MESSAGE_LIMIT` **und** vom IP-Rate-Limit aus. Letzteres ist der zweite
+Gewinn: **Ohne Rate-Limit braucht der Katalog keine Blöcke und keine Pausen** —
+59 Fälle laufen in gut einer Minute statt in einer Viertelstunde
+(`scripts/qs_live.sh` schaltet automatisch um, sobald `DHI_TEST_TOKEN` gesetzt ist).
+
+Zwei bewusste Härten, damit die Trennung nicht stillschweigend kippt: Ein
+falscher Token wird mit `403` abgewiesen, statt auf den Produktivpfad
+zurückzufallen. Und ein gültiger Token ohne konfigurierten Zweitschlüssel
+liefert `503` statt einer Antwort auf Produktivkosten. Fehlt das Secret ganz,
+warnen Runner und Skript im Log — der Lauf geht dann wie bisher aufs
+Produktivguthaben. Der Smoke-Test meldet den Zustand als Hinweis mit
+(`test_key_configured` in `/api/health`).
 
 Alles andere ist kostenlos: GitHub Actions ist für öffentliche Repos
 unbegrenzt frei, der Smoke-Test schickt keine Chat-Anfrage.
@@ -215,6 +277,10 @@ ein Runner ist genau eine IP.
 `scripts/qs_live.sh` teilt den Katalog deshalb in Blöcke zu 18 Fällen mit
 310 Sekunden Pause. Über `BLOCK`, `PAUSE` und `WORKERS` lässt sich das
 anpassen, wenn sich das Rate-Limit ändert.
+
+**Mit gesetztem `DHI_TEST_TOKEN` entfällt das komplett:** QS-Anfragen sind vom
+Rate-Limit ausgenommen (siehe Abschnitt 5), das Skript schaltet dann von selbst
+auf einen Block ohne Pause um.
 
 Einzelne Fälle nachprüfen, ohne den ganzen Katalog zu bezahlen — z.B. nach
 einer Prompt-Änderung nur die zuletzt gescheiterten Fälle (Präfix-Match,

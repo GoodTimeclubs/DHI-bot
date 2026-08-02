@@ -168,7 +168,11 @@ jobs:
         run: python scripts/smoke_live.py --base-url "$BOT_URL"
 
   # ── 5 · QS-Testkatalog gegen die Live-URL ─────────────────────────────────
-  # ACHTUNG: verbraucht echtes Anthropic-Guthaben (voll = 49 Chat-Anfragen).
+  # Verbraucht echtes Anthropic-Guthaben (Volllauf ≈ 50 US-Cent) — mit dem
+  # Secret QS_TEST_TOKEN aber vom GETRENNTEN Schlüssel des Servers
+  # (ANTHROPIC_API_KEY_TEST), nicht vom Produktivguthaben. Ohne das Secret
+  # läuft der Katalog über den Produktivschlüssel und zählt gegen das
+  # Tageslimit; der Runner warnt dann im Log.
   # Umfang umstellbar ohne YAML-Änderung: Repository-Variable QS_UMFANG
   # auf "smoke" (15 Fälle) oder "aus" setzen.
   qs:
@@ -177,6 +181,8 @@ jobs:
     needs: smoke
     if: (github.event.inputs.qs_umfang || vars.QS_UMFANG || 'voll') != 'aus'
     timeout-minutes: 35
+    # Nötig, damit das Environment-Secret QS_TEST_TOKEN sichtbar ist.
+    environment: production
     steps:
       - uses: actions/checkout@v4
 
@@ -203,6 +209,9 @@ jobs:
         env:
           BASE_URL: ${{ env.BOT_URL }}
           UMFANG: ${{ github.event.inputs.qs_umfang || vars.QS_UMFANG || 'voll' }}
+          # Trennt den Testverkehr vom Produktivguthaben und hebt zugleich das
+          # IP-Rate-Limit auf — der Katalog läuft damit ohne Pausen durch.
+          DHI_TEST_TOKEN: ${{ secrets.QS_TEST_TOKEN }}
         run: bash scripts/qs_live.sh
 
       - name: QS-Bericht sichern

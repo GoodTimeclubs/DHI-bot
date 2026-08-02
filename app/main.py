@@ -1,6 +1,7 @@
 """FastAPI-Server: Chat-API, Demo-Seite, Widget, täglicher Re-Crawl."""
 from __future__ import annotations
 
+import secrets
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -16,6 +17,7 @@ from . import crawler, indexer, llm, retrieval
 from .config import (
     ADMIN_TOKEN,
     ALLOWED_ORIGINS,
+    ANTHROPIC_API_KEY_TEST,
     ANTHROPIC_MODEL,
     CONTACT,
     CRAWL_HOUR,
@@ -24,6 +26,7 @@ from .config import (
     DATA_DIR,
     DETERMINISTIC_TERMINE,
     MOCK_LLM,
+    TEST_TOKEN,
     TIMEZONE,
     TRUST_PROXY,
 )
@@ -98,18 +101,44 @@ def _rate_ok(ip: str, limit: int = 20, window: int = 300) -> bool:
     return True
 
 
-_daily = {"date": "", "count": 0}
+_daily = {"date": "", "count": 0, "test_count": 0}
+
+
+def _daily_roll() -> None:
+    today = time.strftime("%Y-%m-%d")
+    if _daily["date"] != today:
+        _daily.update(date=today, count=0, test_count=0)
 
 
 def _daily_ok() -> bool:
     """Globale Kostenbremse: begrenzt die Nachrichten pro Kalendertag."""
-    today = time.strftime("%Y-%m-%d")
-    if _daily["date"] != today:
-        _daily["date"], _daily["count"] = today, 0
+    _daily_roll()
     if DAILY_MESSAGE_LIMIT and _daily["count"] >= DAILY_MESSAGE_LIMIT:
         return False
     _daily["count"] += 1
     return True
+
+
+def _qs_key(x_dhi_test: str) -> str | None:
+    """Prüft den QS-Header und liefert den Test-API-Key (None = normaler Betrieb).
+
+    Der Testkatalog stellt echte Chat-Anfragen an genau diesen Server. Ohne
+    getrennten Schlüssel ginge jeder Lauf vom Produktivguthaben ab — wäre das
+    leer, verstummte der Bot für echte Besucher. Ein falscher Token wird
+    deshalb abgewiesen, statt still auf den Produktivpfad zurückzufallen: Eine
+    kaputte QS-Konfiguration soll auffallen, nicht heimlich Guthaben ausgeben.
+    """
+    if not x_dhi_test:
+        return None
+    if not TEST_TOKEN or not secrets.compare_digest(x_dhi_test, TEST_TOKEN):
+        raise HTTPException(403, "Ungültiger Test-Token.")
+    if not ANTHROPIC_API_KEY_TEST:
+        raise HTTPException(
+            503,
+            "Test-Token akzeptiert, aber kein ANTHROPIC_API_KEY_TEST konfiguriert — "
+            "der Lauf würde sonst das Produktivguthaben verbrauchen.",
+        )
+    return ANTHROPIC_API_KEY_TEST
 
 
 _LIMIT_REPLY = (
@@ -126,12 +155,20 @@ class ChatIn(BaseModel):
 
 
 @app.post("/api/chat")
-def chat(body: ChatIn, request: Request):
-    ip = _client_ip(request)
-    if not _rate_ok(ip):
-        raise HTTPException(429, "Zu viele Anfragen, bitte kurz warten.")
-    if not _daily_ok():
-        return {"reply": _LIMIT_REPLY, "sources": [], "mock": False}
+def chat(body: ChatIn, request: Request, x_dhi_test: str = Header(default="")):
+    qs_key = _qs_key(x_dhi_test)
+    if qs_key is None:
+        ip = _client_ip(request)
+        if not _rate_ok(ip):
+            raise HTTPException(429, "Zu viele Anfragen, bitte kurz warten.")
+        if not _daily_ok():
+            return {"reply": _LIMIT_REPLY, "sources": [], "mock": False}
+    else:
+        # QS-Verkehr wird getrennt gezählt: Er darf die Kostenbremse für echte
+        # Besucher weder auslösen noch aufbrauchen, und das IP-Rate-Limit
+        # (20 / 5 Min) würde einen Kataloglauf sonst künstlich strecken.
+        _daily_roll()
+        _daily["test_count"] += 1
     if not (DATA_DIR / "index.pkl").exists():
         return {
             "reply": "Ich lade gerade die Website-Inhalte, bitte in etwa einer Minute "
@@ -140,7 +177,7 @@ def chat(body: ChatIn, request: Request):
             "mock": MOCK_LLM,
         }
     try:
-        return llm.answer(body.message, body.history)
+        return llm.answer(body.message, body.history, api_key=qs_key)
     except Exception as e:  # noqa: BLE001
         print(f"!! Chat-Fehler: {type(e).__name__}: {e}")
         raise HTTPException(502, "Antwort derzeit nicht möglich, bitte später erneut versuchen.")
@@ -148,6 +185,7 @@ def chat(body: ChatIn, request: Request):
 
 @app.get("/api/health")
 def health():
+    _daily_roll()
     return {
         "status": "ok",
         "model": ANTHROPIC_MODEL,
@@ -155,6 +193,10 @@ def health():
         "deterministic_termine": DETERMINISTIC_TERMINE,
         "messages_today": _daily["count"],
         "daily_limit": DAILY_MESSAGE_LIMIT,
+        # Läuft der QS-Katalog über einen eigenen Schlüssel? Der Smoke-Test der
+        # Pipeline prüft das, damit ein Lauf nicht unbemerkt aufs Produktivguthaben geht.
+        "test_key_configured": bool(ANTHROPIC_API_KEY_TEST and TEST_TOKEN),
+        "test_messages_today": _daily["test_count"],
         **retrieval.stats(),
     }
 

@@ -17,9 +17,18 @@ set -Eeuo pipefail
 
 BASE_URL="${BASE_URL:?BASE_URL fehlt}"
 UMFANG="${UMFANG:-voll}"
-BLOCK="${BLOCK:-18}"        # unter dem Limit von 20 Anfragen / 5 Min / IP
-PAUSE="${PAUSE:-310}"       # Zeitfenster 300 s + Puffer
 WORKERS="${WORKERS:-4}"
+
+# Mit gesetztem Test-Token läuft der Katalog auf dem getrennten QS-Schlüssel
+# des Servers — dort greift kein IP-Rate-Limit, also braucht es weder Blöcke
+# noch Pausen: 59 Fälle in gut einer Minute statt in einer Viertelstunde.
+if [ -n "${DHI_TEST_TOKEN:-}" ]; then
+  BLOCK="${BLOCK:-999}"
+  PAUSE="${PAUSE:-0}"
+else
+  BLOCK="${BLOCK:-18}"      # unter dem Limit von 20 Anfragen / 5 Min / IP
+  PAUSE="${PAUSE:-310}"     # Zeitfenster 300 s + Puffer
+fi
 OUT_DIR="${OUT_DIR:-tests/report}"
 ONLY="${ONLY:-}"            # z.B. ONLY=C4,C5,H1 — nur diese Fälle, praktisch zum
                             # Nachprüfen einzelner Befunde, ohne den vollen Katalog
@@ -56,6 +65,11 @@ anzahl_bloecke=${#BLOECKE[@]}
 [ "$anzahl_bloecke" -gt 0 ] || { echo "!! Keine Testfälle ausgewählt (UMFANG=$UMFANG)"; exit 1; }
 
 echo "QS-Testkatalog ($UMFANG) gegen $BASE_URL — $anzahl_bloecke Block/Blöcke à max. $BLOCK Fälle"
+if [ -n "${DHI_TEST_TOKEN:-}" ]; then
+  echo "Getrennter QS-Schlüssel: aktiv (Produktivguthaben bleibt unberührt, keine Pausen nötig)"
+else
+  echo "!! Kein DHI_TEST_TOKEN gesetzt — dieser Lauf geht auf das PRODUKTIVGUTHABEN."
+fi
 
 fehler=0
 for i in "${!BLOECKE[@]}"; do

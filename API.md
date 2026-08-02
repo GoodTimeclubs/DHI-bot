@@ -16,6 +16,7 @@ Eine interaktive Übersicht (Swagger UI) liefert FastAPI automatisch unter
 | `POST` | `/api/chat` | Chat-Nachricht beantworten | keine (öffentlich) |
 | `GET` | `/api/health` | Status, Datenstand, Zähler | keine |
 | `GET` | `/api/termine` | Terminstand, aus dem der Bot antwortet | keine |
+| `POST` | `/api/chat` mit `X-DHI-Test` | wie oben, aber über den QS-Schlüssel | `X-DHI-Test` |
 | `POST` | `/api/reindex` | Website neu crawlen + Index neu bauen | `X-Admin-Token` |
 | `GET` | `/` | Demo-Seite mit eingebettetem Widget | keine |
 | `GET` | `/widget.js` | Einbettbares Chat-Widget (JavaScript); `Cache-Control: public, max-age=300` | keine |
@@ -135,6 +136,36 @@ Status- und Monitoring-Endpunkt (z.B. für UptimeRobot).
 | `daily_limit` | konfiguriertes Tageslimit (`0` = deaktiviert) |
 | `index_built_at` / `chunks` | Stand und Größe des Suchindex |
 | `termine` / `termine_fetched_at` | Anzahl und Stand der Termindaten aus dem Seminarkalender |
+
+---
+
+### Header `X-DHI-Test` — QS-Läufe auf getrenntem Guthaben
+
+Der Testkatalog stellt echte Chat-Anfragen an den Produktivserver. Damit ein
+Lauf nicht das Guthaben aufbraucht, aus dem echte Besucher bedient werden,
+kennt `/api/chat` einen zweiten Weg: Anfragen mit dem Header
+`X-DHI-Test: <TEST_TOKEN>` beantwortet der Bot über `ANTHROPIC_API_KEY_TEST`
+statt über den Produktivschlüssel.
+
+Solche Anfragen zählen **nicht** gegen `DAILY_MESSAGE_LIMIT` und **nicht**
+gegen das IP-Rate-Limit (20 / 5 Min); gezählt werden sie getrennt als
+`test_messages_today` in `/api/health`.
+
+| Fall | Antwort |
+|---|---|
+| Header fehlt | normaler Betrieb über den Produktivschlüssel |
+| Token falsch oder `TEST_TOKEN` nicht gesetzt | `403` — kein stiller Rückfall auf den Produktivpfad |
+| Token gültig, aber `ANTHROPIC_API_KEY_TEST` leer | `503` — lieber keine Antwort als eine auf Produktivkosten |
+
+```bash
+curl -X POST https://bot.example.de/api/chat \
+  -H "Content-Type: application/json" \
+  -H "X-DHI-Test: $TEST_TOKEN" \
+  -d '{"message": "Was kostet die Stufe 3?", "history": []}'
+```
+
+Beide Werte stehen in der `.env` **auf dem Server**; in GitHub liegt derselbe
+Token als Secret `QS_TEST_TOKEN`. Details: [docs/ci-cd.md](docs/ci-cd.md).
 
 ---
 

@@ -270,14 +270,18 @@ def _ohne_gedankenstriche(text: str) -> str:
     return text.replace("—", ", ")
 
 
-def answer(message: str, history: list[dict]) -> dict:
-    """Öffentlicher Einstieg: Antwort erzeugen, dann Stilfilter anwenden."""
-    result = _answer(message, history)
+def answer(message: str, history: list[dict], api_key: str | None = None) -> dict:
+    """Öffentlicher Einstieg: Antwort erzeugen, dann Stilfilter anwenden.
+
+    `api_key` überschreibt den Produktivschlüssel — genutzt vom QS-Pfad, damit
+    Testläufe auf ein eigenes Guthaben gehen (siehe ANTHROPIC_API_KEY_TEST).
+    """
+    result = _answer(message, history, api_key)
     result["reply"] = _ohne_gedankenstriche(result["reply"])
     return result
 
 
-def _answer(message: str, history: list[dict]) -> dict:
+def _answer(message: str, history: list[dict], api_key: str | None = None) -> dict:
     # Reine Terminlistenfragen deterministisch beantworten (QS-Befund 8):
     # strukturierter Filter über termine.json statt LLM-Auswahl — der früheste
     # passende Termin kann so nie ausgelassen werden. Greift bewusst nur bei
@@ -294,12 +298,14 @@ def _answer(message: str, history: list[dict]) -> dict:
         if c["url"] not in [s["url"] for s in sources]:
             sources.append({"url": c["url"], "title": c["title"]})
 
-    if MOCK_LLM:
+    # Ein QS-Lauf bringt seinen eigenen Schlüssel mit und soll auch dann echte
+    # Antworten prüfen, wenn der Produktivschlüssel fehlt (Mock-Modus).
+    if MOCK_LLM and not api_key:
         return {"reply": _mock_reply(message, chunks), "sources": sources[:4], "mock": True}
 
     import anthropic
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = anthropic.Anthropic(api_key=api_key or ANTHROPIC_API_KEY)
     msgs = [
         {"role": m["role"], "content": str(m["content"])[:2000]}
         for m in history[-10:]

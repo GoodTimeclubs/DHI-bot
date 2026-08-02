@@ -100,6 +100,15 @@ def pruefe_health(client: httpx.Client, base_url: str, max_alter_h: float) -> No
         "Deterministische Terminantworten aktiv",
         str(d.get("deterministic_termine")),
     )
+    # Nur ein Hinweis: Der Bot funktioniert auch ohne getrennten QS-Schlüssel —
+    # dann geht aber jeder Testkatalog-Lauf vom Produktivguthaben ab.
+    merke(
+        True if d.get("test_key_configured") else None,
+        "QS-Läufe auf getrenntem API-Schlüssel",
+        "" if d.get("test_key_configured")
+        else "ANTHROPIC_API_KEY_TEST/TEST_TOKEN fehlen auf dem Server — "
+             "der Testkatalog verbraucht sonst Produktivguthaben",
+    )
 
     gebaut = d.get("index_built_at")
     if not gebaut:
