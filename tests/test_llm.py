@@ -49,6 +49,24 @@ def test_prompt_enthaelt_kernregeln():
         # Nachschärfungen aus QS-Runde 3 (01.08., 46/49):
         "kein Aufsatz",
         "sind NICHT automatisch der Praxis-Kontakt",
+        # ── Rückmeldungen aus dem Live-Betrieb (01.08.2026) ──────────────────
+        # 1. Übungstage-Preise sind standortabhängig (Leipzig ≠ Aschaffenburg)
+        "STANDORTABHÄNGIGE PREISE",
+        "Übertrage einen Standortpreis NIEMALS auf einen anderen Standort",
+        # 2. Terminantworten enden mit dem Button zur Terminseite
+        "[Alle Termine im Seminarkalender]({seminarkalender_url})",
+        # 3. Berlin ist kein Ausbildungsstandort (Hamburg/Oberstaufen/Gallicano
+        #    dagegen schon — dort nur ohne feste Termine)
+        "11. STANDORTE",
+        "leite auch aus Kundenstimmen",
+        "Übungsstandorte verfügbar, dort aber OHNE feste Termine",
+        # 4. Rückfrage statt raten (Ausbildung oder Praxis?)
+        "12. RÜCKFRAGE STATT RATEN",
+        # 5. Skepsis: Beratungsgespräch anbieten
+        "13. SKEPSIS ERNST NEHMEN",
+        "ohne Verkaufsdruck",
+        # 6. Verbindliche Klarstellungen (Personen/Kooperationen)
+        "VERBINDLICHE KLARSTELLUNGEN",
     )
     for regel in kernregeln:
         assert regel in t, f"Kernregel fehlt im System-Prompt: {regel!r}"
@@ -91,13 +109,40 @@ def test_build_system_fuellt_alle_platzhalter(monkeypatch):
          "text": "Hypnose-Sitzung 180 €"},
     ])
     for platzhalter in ("{today}", "{termine}", "{termine_stand}", "{preise}",
-                        "{context}", "{telefon}", "{whatsapp}", "{whatsapp_link}", "{email}"):
+                        "{context}", "{telefon}", "{whatsapp}", "{whatsapp_link}", "{email}",
+                        "{klarstellungen}", "{standorte}", "{standorte_anfrage}",
+                        "{keine_standorte}", "{seminarkalender_url}"):
         assert platzhalter not in out, f"Platzhalter nicht befüllt: {platzhalter}"
     assert "06021 920 8003" in out                      # Telefon als Text
     assert "https://wa.me/4915154434470" in out         # einzig erlaubter WhatsApp-Link
     assert "05.01." in out                              # Termin formatiert
     assert "Hypnose-Sitzung 180 €" in out               # Kontext-Auszug
     assert "3.596" in out                               # PREISDATEN-Block
+    assert "seminarkalender.html" in out                # Terminseite verlinkbar
+    assert "Aschaffenburg, Leipzig, Stuttgart" in out   # Orte mit festen Terminen
+    assert "Hamburg, Oberstaufen-Steibis, Gallicano" in out  # Übungsorte auf Anfrage
+    assert "Berlin ist weder Ausbildungs- noch Übungsstandort" in out
+    assert "Katrin Winkelmann" in out                   # Klarstellungs-Block
+
+
+def test_hamburg_und_co_werden_nicht_als_nicht_standort_gefuehrt():
+    """Regressionsschutz: Hamburg, Oberstaufen-Steibis und Gallicano sind laut
+    Website verfügbare Übungsstandorte (nur ohne feste Termine). Sie dürfen
+    nie in der Verneinungsliste landen — sonst sagt der Bot echten
+    Interessenten ab (bestehender Testkatalog-Fall B8)."""
+    from app.config import KEINE_AUSBILDUNGSSTANDORTE, UEBUNGSSTANDORTE_AUF_ANFRAGE
+    assert set(KEINE_AUSBILDUNGSSTANDORTE) == {"Berlin"}
+    assert "Hamburg" in UEBUNGSSTANDORTE_AUF_ANFRAGE
+
+
+def test_klarstellung_winkelmann_wird_woertlich_uebernommen():
+    """Die Aussage ist rechtlich heikel und muss unverändert im Prompt landen
+    (Vorgabe des Instituts, steht bewusst nicht auf der Website)."""
+    text = llm.format_klarstellungen()
+    assert "war bis 2025 für das Deutsche Hypnoseinstitut (DHI) tätig" in text
+    assert "keine Zusammenarbeit mehr" in text
+    assert "nicht berechtigt, Ausbildungen im Namen des DHI durchzuführen" in text
+    assert "DHI-Zertifikate auszustellen" in text
 
 
 # ── PREISDATEN-Block: neue Produkte, wörtliche Zeilen ────────────────────────
@@ -119,6 +164,100 @@ def test_format_preise_faellt_bei_unbekanntem_produkt_auf_den_seitentitel(monkey
     assert "https://dhi2.de/s/d-hi/reinkarnation-test" in out
     assert "499,00 €" in out                            # wörtliche Preiszeile
     assert "Monatsraten" in out                         # wörtliche Ratenzeile
+
+
+# ── Standortabhängige Preise der Übungstage (Live-Befund 01.08.2026) ─────────
+
+def _uebungstage_seite():
+    """Buchungsseite der Übungstage: nennt nur den Basispreis (Aschaffenburg)."""
+    return {
+        "source": "buchungsseite",
+        "product_key": "practice12",
+        "title": "DHI2.0 Übungstage der Stufen 1+2 in Präsenz",
+        "url": "https://dhi2.de/s/d-hi/uebungstage-12",
+        "text": "DHI2.0 Übungstage der Stufen 1+2 in Präsenz\n1.196,00€\n"
+                "Der Betrag wird in 4 Monatsraten beglichen",
+    }
+
+
+def test_standortpreise_aus_dem_crawl_haben_vorrang(monkeypatch):
+    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {
+        "preisvarianten": {"practice12": {"Leipzig": "1.499,00 €"}},
+    })
+    assert llm.standortpreise("practice12") == {"Leipzig": "1.499,00 €"}
+
+
+def test_standortpreise_fallen_auf_die_gepflegte_tabelle_zurueck(monkeypatch):
+    """Scheitert der Checkout-Abruf, muss der Bot trotzdem korrekte
+    Standortpreise kennen (config.UEBUNGSTAGE_PREISE_FALLBACK)."""
+    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {})
+    preise = llm.standortpreise("practice12")
+    assert preise["Aschaffenburg"] == "1.196,00 €"
+    assert preise["Leipzig"] == "1.496,00 €"
+    assert preise["Stuttgart"] == "1.496,00 €"
+
+
+def test_preisblock_nennt_standortpreise_statt_basispreis(monkeypatch):
+    """Kernfix: Der Basispreis der Produktseite (1.196,00 €) gilt nur für
+    Aschaffenburg. Er darf im PREISDATEN-Block nicht mehr ohne Ortsangabe
+    auftauchen, sonst nennt das Modell ihn für Leipzig oder Stuttgart."""
+    monkeypatch.setattr(llm.retrieval, "get_pages", lambda: [_uebungstage_seite()])
+    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {
+        "preisvarianten": {"practice12": {
+            "Aschaffenburg": "1.196,00 €", "Leipzig": "1.496,00 €", "Stuttgart": "1.496,00 €",
+        }},
+    })
+    out = llm.format_preise()
+    assert "STANDORTPREISE" in out
+    for zeile in ("Aschaffenburg: 1.196,00 €", "Leipzig: 1.496,00 €", "Stuttgart: 1.496,00 €"):
+        assert zeile in out, f"fehlt: {zeile}"
+    # der unbeschriftete Basispreis ist raus, die Ratenangabe bleibt
+    assert "„1.196,00€“" not in out
+    assert "Monatsraten" in out
+    assert "https://dhi2.de/s/d-hi/uebungstage-12" in out
+
+
+def test_standortpreise_folgen_dem_seminarkalender(monkeypatch):
+    """Die feste Tabelle darf keine Orte behaupten, an denen das Produkt laut
+    Kalender gar nicht mehr stattfindet."""
+    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {
+        "seminars": [
+            {"product_key": "practice12", "location": "Aschaffenburg"},
+            {"product_key": "practice12", "location": "Leipzig"},
+            {"product_key": "hybrid12", "location": "Live-Online"},
+        ],
+    })
+    assert set(llm.standortpreise("practice12")) == {"Aschaffenburg", "Leipzig"}
+
+
+def test_kontext_warnt_vor_dem_basispreis_der_buchungsseite(monkeypatch):
+    """Der Auszug der Buchungsseite enthält den nackten Basispreis ohne Ort.
+    Ohne Warnung stünde er gleichberechtigt neben den STANDORTPREISEN — genau
+    das führte zur falschen Leipzig-Auskunft."""
+    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {
+        "preisvarianten": {"practice12": {"Leipzig": "1.496,00 €"}},
+    })
+    monkeypatch.setattr(llm.retrieval, "get_pages", lambda: [_uebungstage_seite()])
+    out = llm.build_system([
+        {"title": "Übungstage", "url": "https://dhi2.de/s/d-hi/uebungstage-12",
+         "source": "buchungsseite", "product_key": "practice12",
+         "text": "DHI2.0 Übungstage der Stufen 1+2\n1.196,00€"},
+        {"title": "FAQ", "url": "https://deutsches-hypnoseinstitut.de/faq-ausbildung.html",
+         "source": "website", "text": "Ablauf der Ausbildung"},
+    ])
+    assert "Beträge in diesem Auszug sind Basispreise OHNE Ortsangabe" in out
+    # nur einmal: Website-Auszüge ohne Preisbezug bleiben unkommentiert
+    assert out.count("[ACHTUNG:") == 1
+
+
+def test_preisblock_laesst_produkte_ohne_standortpreise_unveraendert(monkeypatch):
+    """Vollpräsenz findet nur in Aschaffenburg statt — dort bleibt der
+    wörtliche Preis der Buchungsseite die Quelle."""
+    monkeypatch.setattr(llm.retrieval, "get_pages", lambda: [_fake_buchungsseite()])
+    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {})
+    out = llm.format_preise()
+    assert "STANDORTPREISE" not in out
+    assert "3.596,00 €" in out
 
 
 def test_format_preise_ignoriert_websiteseiten(monkeypatch):

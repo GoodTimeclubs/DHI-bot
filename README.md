@@ -1,4 +1,4 @@
-# DHI Bot (v0.3.1)
+# DHI Bot (v0.3.2)
 
 Chat-Assistent für **deutsches-hypnoseinstitut.de** und alle DHI-Subdomains:
 beantwortet Besucherfragen zu Website-Inhalten, Ausbildungen, dem
@@ -13,8 +13,21 @@ Besucher → widget.js (Chat) → Caddy (HTTPS) → FastAPI /api/chat → BM25-R
      täglicher Crawl (03:10 Uhr) ───────────────────────┘       deterministisch aus termine.json
      ├─ Sitemap: Hauptdomain + 10 Subdomains (Liste s.u.)       (app/termine.py, ohne LLM)
      ├─ Termine: assets/js/dhi-seminarkalender.js (strukturiert geparst)
-     └─ Buchungsseiten: dhi2.de (Ablefy) — Preise, Raten, Restplätze
+     ├─ Buchungsseiten: dhi2.de (Ablefy) — Preise, Raten, Restplätze
+     └─ Checkout-Seiten (…/payment) — standortabhängige Preise der Übungstage
 ```
+
+**Standortabhängige Preise (v0.3.2):** Die Ablefy-Produktseite der Präsenz-Übungstage
+nennt nur *einen* Basispreis (den von Aschaffenburg). Tatsächlich kosten die Übungstage
+je nach Ort unterschiedlich viel („Die Preise sind abhängig vom Aufwand und den
+Extra-Kosten an externen Standorten"); die einzelnen Standort-Tickets stehen erst im
+Checkout (Produkt-URL + `/payment`). Der tägliche Crawl liest sie dort aus und legt sie
+in `data/termine.json` unter `preisvarianten` ab; der System-Prompt bekommt daraus einen
+`STANDORTPREISE`-Block und darf einen Ortspreis nie auf einen anderen Ort übertragen.
+Scheitert der Checkout-Abruf oder deckt er nicht alle Standorte des Produkts ab, greift
+die gepflegte Tabelle `UEBUNGSTAGE_PREISE_FALLBACK` in `app/config.py` — **dort bei einer
+Preisänderung nachziehen**. Weicht der Crawl von dieser Tabelle ab, steht ein Hinweis im
+Crawl-Log.
 
 **Deterministische Terminantworten (v0.2.3, QS-Befund 8):** Eindeutige
 Terminlistenfragen („Welche Übungstage gibt es in Stuttgart?") beantwortet der Bot
@@ -97,6 +110,32 @@ docker compose up
 ➜ **Ausführliche API-Dokumentation mit Beispielen (curl/PowerShell/JS): [API.md](API.md)**
    Interaktive Swagger-Übersicht im Betrieb unter `/docs`.
 
+## Inhaltliche Regeln pflegen (ohne .env)
+
+Ein Teil des Bot-Verhaltens ist bewusst nicht per Umgebungsvariable, sondern in
+`app/config.py` hinterlegt — dort steht alles an einer Stelle und wird von den
+Unit-Tests abgesichert:
+
+| Konstante | Wofür |
+|---|---|
+| `AUSBILDUNGSSTANDORTE` | Orte mit festen Terminen im Kalender (Aschaffenburg, Leipzig, Stuttgart) |
+| `UEBUNGSSTANDORTE_AUF_ANFRAGE` | Verfügbare Übungsstandorte ohne feste Termine (Hamburg, Oberstaufen-Steibis, Gallicano) — dürfen nie verneint werden |
+| `KEINE_AUSBILDUNGSSTANDORTE` | Orte, die *keine* Ausbildungs- oder Übungsstandorte sind, mit Erklärung — aktuell nur **Berlin** (dort nur die DHI-Hypnosepraxis). Ohne diesen Hinweis las das Modell aus alten Kundenstimmen einen Standort heraus. |
+| `UEBUNGSTAGE_PREISE_FALLBACK` | Standortpreise der Übungstage als Rückfallebene zum Checkout-Crawl |
+| `KLARSTELLUNGEN` | Verbindliche Aussagen, die nicht auf der Website stehen (z.B. zur Zusammenarbeit mit einzelnen Personen). Wörtlich übernommen, erweiterbar um weitere Einträge `{thema, aussage}`. |
+
+Verhaltensregeln, die dazugehören, stehen im System-Prompt (`app/llm.py`):
+Standortpreise nie auf einen anderen Ort übertragen (Regel 6), Terminantworten
+enden mit dem Button zur Terminseite (Regel 5), Nicht-Standorte klar verneinen
+und Alternative anbieten (Regel 11), bei unklarem Anliegen erst eine Rückfrage
+„Ausbildung oder Hypnose für sich selbst?" (Regel 12) und bei Skepsis aktiv das
+unverbindliche Beratungsgespräch anbieten (Regel 13).
+
+Zur Rückfrage-Regel gehört ein Gegenstück im deterministischen Terminpfad:
+`app/termine.py` schickt Fragen mit Sitzungs- oder Klientenbezug („Ich möchte
+eine Hypnose, wann haben Sie in Aschaffenburg einen Termin?") bewusst ans LLM,
+damit dort nachgefragt statt geraten wird.
+
 ## Wichtige Einstellungen (`.env`)
 
 - `ANTHROPIC_API_KEY` — ohne Key: Mock-Modus
@@ -170,10 +209,15 @@ Drei Test-Ebenen liegen unter `tests/` (Einrichtung: `pip install -r requirement
    (Link-Pflichten, Preis-Trennung, Praxen-Baustein), der PREISDATEN-Block
    erfasst auch neue Ablefy-Produkte, und das Retrieval boostet
    Buchungsseiten bei Ausbildungs- (nicht aber bei Sitzungs-)Preisfragen.
+   Seit v0.3.2 zusätzlich: der Checkout-Parser ordnet jedem Standort seinen
+   eigenen Preis zu (layoutunabhängig, mit Fallback auf die Tabelle in
+   `config.py`), jede deterministische Terminantwort endet mit dem Button zur
+   Terminseite, und die verbindlichen Klarstellungen stehen wörtlich im Prompt.
 
-1. **Testkatalog** — 49 Beispielfragen mit Soll-Verhalten (Inhalte, Termine, Preise,
+1. **Testkatalog** — 59 Beispielfragen mit Soll-Verhalten (Inhalte, Termine, Preise,
    Buchung, Grenzfälle wie Gesundheitsfragen, Heilversprechen, Off-Topic,
-   Prompt-Injection) in `tests/testkatalog.yaml`. Der Runner prüft jede Antwort
+   Prompt-Injection; Block H = Rückmeldungen aus dem Live-Betrieb) in
+   `tests/testkatalog.yaml`. Der Runner prüft jede Antwort
    automatisch (Sie-Form, Formatierung, Links, WhatsApp-Nummer, Termine gegen
    `data/termine.json`, Preis-Regeln) und schreibt einen Bericht nach `tests/report/`:
 

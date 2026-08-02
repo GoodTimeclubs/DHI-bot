@@ -30,6 +30,11 @@ from . import retrieval
 
 SEMINARKALENDER_URL = "https://deutsches-hypnoseinstitut.de/seminarkalender.html"
 
+# Fester Abschluss-Baustein jeder Terminantwort: Das Widget rendert
+# [Beschriftung](URL) als Button — steht der Link in der letzten Zeile, endet
+# die Antwort sichtbar mit einem Button auf die Terminseite.
+KALENDER_BUTTON = f"[Alle Termine im Seminarkalender]({SEMINARKALENDER_URL})"
+
 # Kurzlabels für die Antwortzeilen (bewusst eigenständig von llm.KIND_LABEL,
 # um zirkuläre Importe zu vermeiden).
 _KIND_LABEL = {
@@ -56,7 +61,16 @@ _LISTEN_SIGNAL = re.compile(
 )
 
 # Gegen-Signale → immer LLM-Pfad (dort gibt es PREISDATEN, Beratung, Kontext).
+# Dazu gehören seit v0.3.2 auch Hinweise auf eine Sitzung als Klient: „Ich
+# möchte eine Hypnose, wann haben Sie in Aschaffenburg einen Termin?" meint
+# die DHI-Praxis, nicht die Ausbildung — hier muss das LLM nachfragen (Regel 12),
+# statt deterministisch Ausbildungstermine zu listen.
 _BLOCKER = re.compile(
+    r"sitzung|behandl|klient|patient|hypnosepraxis|coaching|therapie|"
+    # „Ich möchte eine Hypnose …" meint eine Sitzung. Das \b nach hypnose
+    # schließt „Hypnoseausbildung", „Hypnoseseminar" usw. bewusst aus.
+    r"ich (m[öo]chte|will|suche|br[äa]uche|h[äa]tte)\b[^.?!]{0,40}\bhypnose\b|"
+    r"hypnose f[üu]r (mich|sich)|"
     r"preis|kost|teuer|€|euro|rate|skonto|rabatt|geb[üu]hr|bezahl|zahlung|anzahlung|invest|finanz|"
     r"buch|anmeld|reservier|pl[äa]tze|platz\b|frei\b|verf[üu]gbar|storn|warteliste|"
     r"inhalt|lern|lehr|curricul|zertifi|pr[üu]fung|abschluss|voraussetzung|vorkenntnis|"
@@ -207,8 +221,10 @@ def _outro(f: dict, treffer: list[dict], weitere: int) -> str:
     saetze = []
     if (f.get("kinds") or set()) == {"hybrid"}:
         saetze.append("Die zugehörigen Präsenz-Übungstage buchen Sie separat dazu.")
-    if weitere > 0:
-        saetze.append(f"Alle weiteren Termine: [Zum Seminarkalender]({SEMINARKALENDER_URL}).")
+    if weitere == 1:
+        saetze.append("Ein weiterer passender Termin ist bereits geplant.")
+    elif weitere > 1:
+        saetze.append(f"Danach sind {weitere} weitere passende Termine geplant.")
     saetze.append(
         "Passt einer dieser Termine für Sie?" if len(treffer) > 1
         else "Passt dieser Termin für Sie?"
@@ -220,7 +236,17 @@ def _format(treffer: list[dict], f: dict, gesamt: int) -> str:
     gezeigt = treffer[:_MAX_LISTE]
     zeilen = [_zeile(s, f, fett=(i == 0)) for i, s in enumerate(gezeigt)]
     return "\n".join(
-        [_intro(f, gezeigt), "", *zeilen, "", _outro(f, gezeigt, gesamt - len(gezeigt))]
+        [
+            _intro(f, gezeigt),
+            "",
+            *zeilen,
+            "",
+            _outro(f, gezeigt, gesamt - len(gezeigt)),
+            # Immer als letztes Element: der Button zur Terminseite. Auch wenn
+            # alle passenden Termine gezeigt wurden, will der Besucher von hier
+            # aus in den vollständigen Kalender wechseln können.
+            KALENDER_BUTTON,
+        ]
     )
 
 

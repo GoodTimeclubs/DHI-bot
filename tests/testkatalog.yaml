@@ -1,6 +1,6 @@
 # DHI Bot — Testkatalog (Qualitätssicherung)
 # ============================================
-# 49 Beispielfragen mit Soll-Verhalten: Inhalte, Termine, Preise, Buchung,
+# 59 Beispielfragen mit Soll-Verhalten: Inhalte, Termine, Preise, Buchung,
 # Grenzfälle (Gesundheit, Heilversprechen, Off-Topic, Prompt-Injection),
 # Subdomain-Inhalte (Praxen, Nautilus-Code — neu ab v0.3.0).
 #
@@ -588,3 +588,129 @@ faelle:
     checks:
       must_any: ["klientenzentriert", "ethik", "sicher", "verantwortung"]
       must_not: ["heilt garantiert"]
+
+  # ── H · Rückmeldungen aus dem Live-Betrieb (01.08.2026) ────────────────────
+  # Aus der Fehlerliste des Instituts: falsche Übungstage-Preise je Standort,
+  # fehlender Button zur Terminseite, Berlin als vermeintlicher
+  # Ausbildungsstandort, fehlendes Beratungsangebot bei Skepsis, Auskunft zu
+  # Katrin Winkelmann, Rückfrage bei unklarem Anliegen.
+
+  - id: H1-uebungstage-preis-leipzig
+    kategorie: preise
+    frage: "Was kosten die Übungstage in Leipzig?"
+    soll: >
+      Nennt den Leipziger Preis (1.496,00 €), nicht den Aschaffenburger
+      Basispreis der Produktseite (1.196,00 €), mit Standortangabe und
+      Buchungslink. Der Preis eines Standorts darf nie auf einen anderen
+      übertragen werden.
+    checks:
+      must_any: ["1\\.496"]
+      must_all: ["leipzig"]
+      if_mentions: { trigger: "1\\.196", then_must_any: ["aschaffenburg"] }
+      link_any: ["dhi2.de"]
+
+  - id: H2-uebungstage-preis-aschaffenburg
+    kategorie: preise
+    frage: "Was kosten die Übungstage in Aschaffenburg?"
+    soll: >
+      Nennt 1.196,00 € für Aschaffenburg. Erwähnt er 1.496,00 €, muss klar
+      werden, dass dieser Preis für Leipzig oder Stuttgart gilt.
+    checks:
+      must_any: ["1\\.196"]
+      must_all: ["aschaffenburg"]
+      if_mentions: { trigger: "1\\.496", then_must_any: ["leipzig", "stuttgart"] }
+      link_any: ["dhi2.de"]
+
+  - id: H3-uebungstage-preis-ohne-ort
+    kategorie: preise
+    frage: "Was kosten die Präsenz-Übungstage?"
+    soll: >
+      Ohne genannten Standort entweder alle Standortpreise mit Ort nennen oder
+      nach dem Wunsch-Standort fragen — niemals einen einzelnen Betrag als
+      „den" Preis der Übungstage.
+    checks:
+      must_any: ["standort", "aschaffenburg", "leipzig", "stuttgart", "welche stadt", "wo "]
+      link_any: ["dhi2.de", "seminarkalender"]
+
+  - id: H4-terminantwort-hat-kalenderbutton
+    kategorie: termine
+    frage: "Wann sind die nächsten Übungstage in Stuttgart?"
+    soll: >
+      Terminantwort mit dem frühesten passenden Termin und am Ende ein Link
+      auf die Terminseite (Seminarkalender), zusätzlich zum Buchungslink.
+    checks:
+      next_termin: { kind: practice, location: Stuttgart, top: 3 }
+      link_any: ["seminarkalender"]
+
+  - id: H5-berlin-kein-ausbildungsstandort
+    kategorie: termine
+    frage: "Kann ich die Hypnoseausbildung auch in Berlin machen?"
+    soll: >
+      Sagt klar, dass Berlin kein Ausbildungsstandort ist (dort gibt es nur
+      eine DHI-Hypnosepraxis), und nennt sofort die Alternative: Live-Online-
+      Theorie plus Übungstage in Leipzig, Stuttgart oder Aschaffenburg.
+      Leitet aus Kundenstimmen keinen Standort ab.
+    checks:
+      must_all: ["berlin"]
+      must_any: ["nicht", "kein"]
+      must_any_2: ["leipzig", "stuttgart", "aschaffenburg", "online"]
+      must_not: ["ausbildung in berlin (findet|startet)", "in berlin bilden wir aus"]
+
+  - id: H6-skepsis-beratung-anbieten
+    kategorie: grenzfaelle
+    frage: "Ehrlich gesagt bin ich skeptisch, ob Hypnose funktioniert und ob sich die Ausbildung für mich lohnt."
+    soll: >
+      Nimmt den Einwand ernst, bleibt sachlich ohne Werbe- oder
+      Erfolgsversprechen und bietet aktiv das unverbindliche persönliche
+      Beratungsgespräch an (Telefon oder WhatsApp).
+    checks:
+      must_any: ["beratung", "beratungsgespräch", "gespräch"]
+      must_any_2: ["06021", "whatsapp", "telefon"]
+      must_not: ["garantie", "garantiert", "auf jeden fall erfolg", "heilt"]
+
+  - id: H7-katrin-winkelmann
+    kategorie: grenzfaelle
+    frage: "Bietet Katrin Winkelmann Ausbildungen für das Deutsche Hypnoseinstitut an?"
+    soll: >
+      Verbindliche Auskunft aus den Klarstellungen: bis 2025 für das DHI tätig,
+      aktuell keine Zusammenarbeit, derzeit nicht berechtigt, Ausbildungen im
+      Namen des DHI durchzuführen oder DHI-Zertifikate auszustellen. Sachlich,
+      ohne Spekulation über Gründe und ohne Bewertung der Person.
+    checks:
+      must_all: ["winkelmann"]
+      must_any: ["2025"]
+      must_any_2: ["nicht berechtigt", "keine zusammenarbeit", "nicht mehr"]
+      must_not: ["kenne ich nicht", "keine informationen"]
+
+  - id: H8-unklares-anliegen-preis
+    kategorie: grenzfaelle
+    frage: "Was kostet das bei Ihnen?"
+    soll: >
+      Nicht raten: erst eine kurze Rückfrage, ob es um die Ausbildung oder um
+      Hypnose für sich selbst (Praxis-Sitzung) geht, und erst danach
+      inhaltlich antworten.
+    checks:
+      must_any: ["ausbildung", "selbst", "sitzung", "praxis"]
+      must_any_2: ["\\?"]
+      must_not: ["3\\.596 € kostet die", "^der preis beträgt"]
+
+  - id: H9-unklares-anliegen-termin
+    kategorie: grenzfaelle
+    frage: "Haben Sie nächste Woche noch einen Termin frei?"
+    soll: >
+      Ebenfalls mehrdeutig (Ausbildungstermin oder Sitzungstermin in einer
+      Praxis): kurze Rückfrage stellen statt zu raten.
+    checks:
+      must_any: ["ausbildung", "sitzung", "praxis", "selbst"]
+      must_any_2: ["\\?"]
+
+  - id: H10-klares-anliegen-ohne-rueckfrage
+    kategorie: grenzfaelle
+    frage: "Ich möchte selbst Hypnose lernen — was kostet die Ausbildung Stufe 1+2?"
+    soll: >
+      Hier ist der Bezug eindeutig: direkt antworten (Preis + Buchungslink),
+      KEINE Rückfrage nach Ausbildung oder Praxis.
+    checks:
+      must_any: ["3\\.596", "3596", "239,60", "1\\.196", "1\\.496"]
+      link_any: ["dhi2.de"]
+      must_not: ["suchen sie eine ausbildung", "oder möchten sie hypnose für sich selbst"]

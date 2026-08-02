@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app.termine import try_answer  # noqa: E402
+from app.termine import KALENDER_BUTTON, SEMINARKALENDER_URL, try_answer  # noqa: E402
 
 TODAY = "2026-07-30"  # fixer Stichtag: Tests bleiben stabil, egal wann sie laufen
 TERMINE = json.loads((ROOT / "data" / "termine.json").read_text(encoding="utf-8"))
@@ -111,6 +111,17 @@ def test_preis_und_buchungsfragen_gehen_ans_llm():
     assert try_answer("Kann ich den Termin in Raten zahlen?", today=TODAY) is None
 
 
+def test_sitzungsfragen_gehen_ans_llm():
+    """Wer eine Hypnose-Sitzung sucht, meint die DHI-Praxis, nicht die
+    Ausbildung — das LLM muss zurückfragen können (Prompt-Regel 12), statt
+    hier deterministisch Ausbildungstermine zu listen. Aschaffenburg ist
+    beides: Ausbildungsort UND Praxisstandort."""
+    assert try_answer("Ich möchte eine Hypnose. Wann haben Sie in Aschaffenburg einen Termin?",
+                      today=TODAY) is None
+    assert try_answer("Wann ist in Leipzig eine Sitzung möglich?", today=TODAY) is None
+    assert try_answer("Wann kann ich als Klient nach Stuttgart kommen?", today=TODAY) is None
+
+
 def test_konzept_und_inhaltsfragen_gehen_ans_llm():
     assert try_answer("Kann ich die Theorie auch komplett online machen?", today=TODAY) is None
     assert try_answer("Welche Inhalte lerne ich in der Stufe 1+2?", today=TODAY) is None
@@ -160,3 +171,40 @@ def test_antwortformat_haelt_die_widget_regeln_ein():
 def test_datumsbereich_format():
     r = try_answer("Welche Übungstage gibt es in Stuttgart?", today=TODAY)
     assert "30.01.–31.01.2027" in r["reply"]
+
+
+# ── Button zur Terminseite (Rückmeldung aus dem Live-Betrieb, 01.08.2026) ────
+
+def test_jede_terminantwort_endet_mit_dem_seminarkalender_button():
+    """„Bei Terminen immer ein Button am Ende auf weitere Termine zu der
+    Terminseite." Das Widget rendert [Beschriftung](URL) als Button — steht der
+    Link in der letzten Zeile, endet die Antwort sichtbar mit diesem Button."""
+    fragen = [
+        "Welche Übungstage gibt es in Stuttgart?",
+        "Wann ist der nächste Termin für Stufe 1+2?",
+        "Wann startet der nächste Stufe-3-Kurs?",
+        "Wann findet die nächste Ausbildung in Leipzig statt?",
+        "Wann sind die nächsten Live-Online-Termine?",
+    ]
+    for frage in fragen:
+        r = try_answer(frage, today=TODAY)
+        assert r is not None, frage
+        zeilen = [z for z in r["reply"].splitlines() if z.strip()]
+        assert zeilen[-1] == KALENDER_BUTTON, f"kein Abschluss-Button bei: {frage!r}"
+        assert r["reply"].count(SEMINARKALENDER_URL) == 1, f"Link doppelt bei: {frage!r}"
+
+
+def test_button_auch_wenn_alle_termine_gezeigt_wurden(monkeypatch):
+    """Auch ohne „weitere" Termine soll der Weg in den Kalender offenstehen."""
+    import app.termine as termine
+    monkeypatch.setattr(termine.retrieval, "get_termine", lambda: {
+        "seminars": [{
+            "id": "t1", "kind": "practice", "stage": "1+2", "start": "2099-05-02",
+            "end": "2099-05-03", "location": "Stuttgart", "url": "https://dhi2.de/s/d-hi/t",
+        }],
+        "notes": [], "fetched_at": "2099-01-01T00:00:00+00:00",
+    })
+    r = try_answer("Welche Übungstage gibt es in Stuttgart?", today=TODAY)
+    assert r["reply"].splitlines()[-1] == KALENDER_BUTTON
+    assert "weitere" not in r["reply"].lower()   # es gibt keine weiteren
+    assert "Passt dieser Termin für Sie?" in r["reply"]

@@ -1,4 +1,4 @@
-# DHI Bot — API-Dokumentation (v0.3.1)
+# DHI Bot — API-Dokumentation (v0.3.2)
 
 REST-API des DHI-Chatbots. Alle Anfragen und Antworten sind JSON (UTF-8).
 
