@@ -159,6 +159,27 @@ def health():
     }
 
 
+@app.get("/api/termine")
+def termine():
+    """Der Terminstand, aus dem der Bot gerade antwortet (data/termine.json).
+
+    Öffentlich, weil die Daten es auch sind: Sie stammen 1:1 aus dem
+    Seminarkalender der Website und stecken ohnehin in jeder Terminantwort.
+
+    Gebraucht wird der Endpunkt vom QS-Lauf der CI/CD-Pipeline. Der prüft, ob
+    der Bot z.B. den frühesten passenden Termin nennt, und braucht dafür die
+    Solldaten. Sie direkt von der Website zu holen scheitert: GitHub-Runner
+    kommen dort nicht durch (Verbindungsabbruch, offenbar werden
+    Rechenzentrums-IPs geblockt). Hier gelesen ist es ohnehin die
+    aussagekräftigere Quelle — geprüft wird gegen genau die Daten, die der
+    Bot kennt, nicht gegen einen Stand, den er noch gar nicht gecrawlt hat.
+    """
+    pfad = DATA_DIR / "termine.json"
+    if not pfad.exists():
+        raise HTTPException(503, "Termine noch nicht geladen.")
+    return FileResponse(pfad, media_type="application/json")
+
+
 @app.post("/api/reindex")
 def reindex(x_admin_token: str = Header(default="")):
     if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:

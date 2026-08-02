@@ -192,15 +192,33 @@ def pruefe_einbau(client: httpx.Client, base_url: str) -> None:
             r = client.get(f"https://{host}/", headers={"User-Agent": BROWSER_UA},
                            timeout=20, follow_redirects=True)
             if r.status_code != 200:
-                return host, f"HTTP {r.status_code} — nicht prüfbar"
-            return host, "ok" if "widget.js" in r.text else "kein Widget-Snippet gefunden"
+                return host, f"HTTP {r.status_code}"
+            return host, "ok" if "widget.js" in r.text else "fehlt"
         except Exception as e:  # noqa: BLE001
-            return host, f"{type(e).__name__} — nicht prüfbar"
+            return host, type(e).__name__
 
     with cf.ThreadPoolExecutor(max_workers=6) as ex:
-        for host, info in ex.map(hole, hosts):
-            merke(True if info == "ok" else None, f"Snippet auf {host}",
-                  "" if info == "ok" else info)
+        befunde = list(ex.map(hole, hosts))
+
+    unpruefbar: list[tuple[str, str]] = []
+    for host, info in befunde:
+        if info == "ok":
+            merke(True, f"Snippet auf {host}")
+        elif info == "fehlt":
+            merke(None, f"Snippet fehlt auf {host}")
+        else:
+            unpruefbar.append((host, info))
+
+    # Aus GitHub Actions heraus ist das der Normalfall: Die Website liegt bei
+    # Hostinger und nimmt von Rechenzentrums-IPs keine Verbindung an. Deshalb
+    # eine gesammelte Zeile statt elf Einzelwarnungen — aussagekräftig wird
+    # diese Prüfung, wenn das Skript von einem normalen Anschluss aus läuft.
+    if unpruefbar:
+        kurz = [h.replace(f".{HAUPTDOMAIN}", "").replace(HAUPTDOMAIN, "(Hauptdomain)")
+                for h, _ in unpruefbar]
+        gruende = sorted({g for _, g in unpruefbar})
+        merke(None, f"{len(unpruefbar)} von {len(hosts)} Domains nicht prüfbar",
+              f"{', '.join(gruende)} — {', '.join(kurz)}")
 
 
 # ── Zusammenfassung ─────────────────────────────────────────────────────────

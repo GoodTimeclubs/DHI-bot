@@ -62,8 +62,9 @@ cd dhi-bot && docker compose up -d
 Das Repo ist öffentlich, ein Deploy-Key für GitHub ist deshalb nicht nötig.
 (Wird es später privat, braucht der Server einen eigenen Read-only-Deploy-Key.)
 
-**b) Benutzer für das Deployment.** Nicht zwingend root — ein eigener Benutzer
-in der `docker`-Gruppe reicht und ist sauberer:
+**b) Benutzer für das Deployment.** Am einfachsten der Benutzer, mit dem du
+dich ohnehin einloggst (bei STRATO meist `root`) — dann ist hier nichts zu tun.
+Sauberer, aber optional, ist ein eigener Benutzer in der `docker`-Gruppe:
 
 ```bash
 adduser --disabled-password --gecos "" deploy
@@ -71,25 +72,52 @@ usermod -aG docker deploy
 chown -R deploy:deploy /opt/dhi-bot
 ```
 
-**c) SSH-Schlüssel nur für die Pipeline.** Auf dem eigenen Rechner erzeugen,
-den öffentlichen Teil auf den Server legen:
+**c) SSH-Schlüssel nur für die Pipeline.** Zweck: GitHub muss sich auf dem VPS
+einloggen können, ohne ein Passwort eingeben zu können. Also ein Schlüsselpaar
+erzeugen, die öffentliche Hälfte auf den Server legen, die private als
+GitHub-Secret hinterlegen. Bei der Passphrase-Abfrage **zweimal Enter** —
+der Schlüssel muss ohne Passphrase sein. `<benutzer>@<server>` ist das, womit
+du dich sonst einloggst (z.B. `root@bot.deutsches-hypnoseinstitut.de`).
+
+*Windows — PowerShell; der OpenSSH-Client steckt in Windows 10/11, auch wenn du
+sonst PuTTY nutzt:*
+
+```powershell
+# 1 · Schlüsselpaar erzeugen (zweimal Enter bei der Passphrase)
+ssh-keygen -t ed25519 -C "github-actions-dhi-bot" -f $env:USERPROFILE\.ssh\dhi-deploy
+
+# 2 · öffentliche Hälfte an die authorized_keys des Servers hängen
+#     (hier fragt er einmal nach dem Server-Passwort — das ist normal)
+type $env:USERPROFILE\.ssh\dhi-deploy.pub | ssh <benutzer>@<server> "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+
+# 3 · Probe — muss OHNE Passwortabfrage durchlaufen
+ssh -i $env:USERPROFILE\.ssh\dhi-deploy <benutzer>@<server> "docker compose version"
+
+# 4 · private Hälfte für das Secret VPS_SSH_KEY in die Zwischenablage
+type $env:USERPROFILE\.ssh\dhi-deploy | clip
+```
+
+*macOS/Linux:*
 
 ```bash
 ssh-keygen -t ed25519 -C "github-actions-dhi-bot" -f ~/.ssh/dhi-deploy -N ""
-ssh-copy-id -i ~/.ssh/dhi-deploy.pub deploy@bot.deutsches-hypnoseinstitut.de
-ssh -i ~/.ssh/dhi-deploy deploy@bot.deutsches-hypnoseinstitut.de "docker compose version"
+ssh-copy-id -i ~/.ssh/dhi-deploy.pub <benutzer>@<server>
+ssh -i ~/.ssh/dhi-deploy <benutzer>@<server> "docker compose version"
 ```
 
-Der letzte Befehl muss ohne Passwort durchlaufen — sonst scheitert auch die
-Pipeline. Läuft auf dem Server fail2ban oder eine Firewall, die SSH auf die
-eigene IP begrenzt: GitHub-Runner haben wechselnde IPs, der Zugang muss also
-offen sein (oder ein selbst gehosteter Runner übernehmen).
+Schritt 3 ist der eigentliche Test: Läuft er ohne Passwort durch, funktioniert
+später auch die Pipeline. Die Datei **mit** `.pub` gehört auf den Server, die
+**ohne** ausschließlich ins GitHub-Secret. Läuft auf dem Server fail2ban oder
+eine Firewall, die SSH auf die eigene IP begrenzt: GitHub-Runner haben
+wechselnde IPs, der Zugang muss also offen sein (oder ein selbst gehosteter
+Runner übernehmen).
 
 **d) Hostschlüssel notieren** (verhindert, dass sich die Pipeline blind mit
-irgendeinem Server verbindet):
+irgendeinem Server verbindet). Die komplette Ausgabe kommt in das Secret
+`VPS_KNOWN_HOSTS`:
 
 ```bash
-ssh-keyscan -t ed25519,rsa bot.deutsches-hypnoseinstitut.de
+ssh-keyscan -t ed25519,rsa <server>
 ```
 
 ---
@@ -188,6 +216,31 @@ ein Runner ist genau eine IP.
 310 Sekunden Pause: 49 Fälle ≈ 12 Minuten. Über `BLOCK`, `PAUSE` und
 `WORKERS` lässt sich das anpassen, wenn sich das Rate-Limit ändert.
 
+### Woher die Solldaten für die Terminprüfungen kommen
+
+Der Katalog prüft unter anderem, ob der Bot den frühesten passenden Termin
+nennt — dafür braucht der Runner die Termine selbst. Die direkt von
+`deutsches-hypnoseinstitut.de` zu holen **funktioniert aus GitHub Actions
+nicht**: Der Runner bekommt keine Verbindung (Zeitüberschreitung, kein 403 —
+Hostinger nimmt von Rechenzentrums-IPs offenbar nichts an; die Website liegt
+dort, der Bot dagegen bei STRATO und ist problemlos erreichbar).
+
+`scripts/fetch_live_termine.py` holt sie deshalb über **`GET /api/termine`**
+vom Bot. Das ist auch inhaltlich der bessere Weg: Geprüft wird gegen genau die
+Termine, die der Bot kennt — sonst meldete der Katalog Fehler, die nur daran
+liegen, dass der nächtliche Crawl eine Kalenderänderung noch nicht aufgenommen
+hat. Dass der Datenstand frisch ist, prüft der Smoke-Test getrennt über das
+Index-Alter.
+
+Aus demselben Grund kann der Smoke-Test aus Actions heraus **nicht** sehen, ob
+das Widget-Snippet auf den Websites eingebunden ist; er meldet die Domains
+gesammelt als „nicht prüfbar". Aussagekräftig wird dieser Teil, wenn du das
+Skript von einem normalen Anschluss aus laufen lässt:
+
+```bash
+python scripts/smoke_live.py --base-url https://bot.deutsches-hypnoseinstitut.de
+```
+
 ---
 
 ## 7 · Wenn etwas klemmt
@@ -201,6 +254,8 @@ ein Runner ist genau eine IP.
 | Smoke-Test meldet `Index jünger als 36 h` als Fehler | Der nächtliche Re-Crawl um 03:10 Uhr ist gescheitert; der Bot antwortet mit veralteten Inhalten weiter. |
 | `mock_mode: true` im Smoke-Test | Auf dem Server fehlt der `ANTHROPIC_API_KEY` in der `.env` — oder das Guthaben ist leer. |
 | QS-Fälle scheitern mit HTTP 429 | Rate-Limit: `BLOCK` verkleinern oder `PAUSE` erhöhen. |
+| `/api/termine` antwortet mit `404` | Auf dem Server läuft noch ein Stand vor v0.3.2. Erst deployen, dann QS — in einem Push passiert genau das automatisch in dieser Reihenfolge. |
+| `/api/termine` antwortet mit `503` | Der Bot hat noch keine Daten geladen (frischer Container mit leerem Volume). Ein paar Minuten warten, bis der erste Crawl durch ist. |
 
 ---
 

@@ -15,6 +15,7 @@ Eine interaktive Übersicht (Swagger UI) liefert FastAPI automatisch unter
 |---|---|---|---|
 | `POST` | `/api/chat` | Chat-Nachricht beantworten | keine (öffentlich) |
 | `GET` | `/api/health` | Status, Datenstand, Zähler | keine |
+| `GET` | `/api/termine` | Terminstand, aus dem der Bot antwortet | keine |
 | `POST` | `/api/reindex` | Website neu crawlen + Index neu bauen | `X-Admin-Token` |
 | `GET` | `/` | Demo-Seite mit eingebettetem Widget | keine |
 | `GET` | `/widget.js` | Einbettbares Chat-Widget (JavaScript); `Cache-Control: public, max-age=300` | keine |
@@ -134,6 +135,46 @@ Status- und Monitoring-Endpunkt (z.B. für UptimeRobot).
 | `daily_limit` | konfiguriertes Tageslimit (`0` = deaktiviert) |
 | `index_built_at` / `chunks` | Stand und Größe des Suchindex |
 | `termine` / `termine_fetched_at` | Anzahl und Stand der Termindaten aus dem Seminarkalender |
+
+---
+
+## GET /api/termine
+
+Liefert `data/termine.json` unverändert aus — also genau die Termine, aus denen
+der Bot gerade antwortet. Inhalt: die aus `assets/js/dhi-seminarkalender.js`
+geparsten Seminare, die `PRODUCT`-Map mit den Ablefy-Buchungslinks, die
+Quell-URL und der Zeitpunkt des letzten Crawls.
+
+```json
+{
+  "seminars": [
+    {
+      "id": "…", "kind": "presence", "stage": "1+2",
+      "title": "DHI 1.0 Hypnose-Grundausbildung",
+      "start": "2026-09-18", "end": "2026-09-20",
+      "time": "10:00–18:00", "location": "Aschaffenburg",
+      "url": "https://dhi2.de/s/d-hi/…"
+    }
+  ],
+  "products": { "presence12": "https://dhi2.de/s/d-hi/…" },
+  "js_url": "https://deutsches-hypnoseinstitut.de/assets/js/dhi-seminarkalender.js?v=20260727a",
+  "fetched_at": "2026-08-01T03:10:04+00:00"
+}
+```
+
+Ohne Auth, weil die Daten öffentlich sind: Sie stehen so im Seminarkalender der
+Website und stecken ohnehin in jeder Terminantwort des Bots. Solange noch keine
+Daten geladen sind, antwortet der Endpunkt mit `503`.
+
+Genutzt wird er vom QS-Lauf der CI/CD-Pipeline
+(`scripts/fetch_live_termine.py`): Der prüft, ob der Bot den frühesten
+passenden Termin nennt, und braucht dafür die Solldaten. Von der Website direkt
+bekommt ein GitHub-Runner sie nicht — Hostinger nimmt von Rechenzentrums-IPs
+keine Verbindung an.
+
+```bash
+curl -s https://bot.example.de/api/termine | head -40
+```
 
 ---
 

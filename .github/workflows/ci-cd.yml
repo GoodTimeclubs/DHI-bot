@@ -191,11 +191,13 @@ jobs:
       - name: Abhängigkeiten installieren
         run: pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Aktuellen Seminarkalender holen
+      - name: Terminstand des Bots holen
         # Der Runner prüft Terminantworten gegen data/termine.json. Die
-        # Fixtures im Repo sind ein alter Stand — hier deshalb dieselbe
-        # Live-Quelle ziehen, die auch der nächtliche Crawl nutzt.
-        run: python scripts/fetch_live_termine.py
+        # Fixtures im Repo sind ein alter Stand, und direkt an die Website
+        # kommt der Runner nicht heran (Hostinger nimmt von
+        # Rechenzentrums-IPs keine Verbindung an) — also über /api/termine
+        # vom Bot selbst, der die Daten nachts ohnehin frisch crawlt.
+        run: python scripts/fetch_live_termine.py --base-url "$BOT_URL"
 
       - name: Katalog durchspielen
         env:

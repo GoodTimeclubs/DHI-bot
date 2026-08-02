@@ -105,6 +105,7 @@ docker compose up
 | `GET /widget.js` | Einbettbares Chat-Widget (`Cache-Control: public, max-age=300`) |
 | `POST /api/chat` | `{"message": "...", "history": [...]}` → `{"reply", "sources", "mock"}` |
 | `GET /api/health` | Status: Index-Größe, Termine, Modell, Mock-Modus |
+| `GET /api/termine` | Terminstand, aus dem der Bot antwortet (Solldaten für den QS-Lauf) |
 | `POST /api/reindex` | Manueller Re-Crawl (Header `X-Admin-Token: <ADMIN_TOKEN>`) |
 
 ➜ **Ausführliche API-Dokumentation mit Beispielen (curl/PowerShell/JS): [API.md](API.md)**
