@@ -54,16 +54,18 @@ def parse_domain_list(raw: str) -> list[str]:
 
 CRAWL_DOMAINS = parse_domain_list(os.getenv("CRAWL_DOMAINS", _DEFAULT_CRAWL_DOMAINS))
 
-# ── Standorte & standortabhängige Preise ─────────────────────────────────────
-# Orte mit festen, im Seminarkalender veröffentlichten Terminen (zusätzlich zur
-# Live-Online-Theorie der DHI 2.0). Die Vollpräsenz DHI 1.0 findet ausschließlich
-# in Aschaffenburg statt; Leipzig und Stuttgart sind Übungsstandorte.
-AUSBILDUNGSSTANDORTE = ["Aschaffenburg", "Leipzig", "Stuttgart"]
+# ── Standorte ─────────────────────────────────────────────────────────────────
+# Orte mit festen, im Shop (/seminare/) veröffentlichten Terminen — FALLBACK:
+# der System-Prompt nimmt die Orte direkt aus den Shop-Daten (termine.json),
+# diese Liste gilt nur, solange noch keine Shop-Daten geladen sind.
+AUSBILDUNGSSTANDORTE = ["Aschaffenburg", "Hamburg", "Leipzig", "München",
+                        "Oberstaufen / Steibis", "Stuttgart"]
 
-# Weitere Übungsstandorte der DHI 2.0 laut Website (hybrid.…/uebungstage-standorte):
+# Weitere Übungsstandorte laut Website (hybrid.…/uebungstage-standorte):
 # verfügbar, aber ohne feste Termine — die Terminplanung startet mit der ersten
-# verbindlichen Anmeldung. Diese Orte dürfen NICHT verneint werden.
-UEBUNGSSTANDORTE_AUF_ANFRAGE = ["Hamburg", "Oberstaufen-Steibis", "Gallicano (Toskana)"]
+# verbindlichen Anmeldung. Diese Orte dürfen NICHT verneint werden. Sobald ein
+# Ort feste Termine im Shop hat, führt ihn der Prompt automatisch dort.
+UEBUNGSSTANDORTE_AUF_ANFRAGE = ["Gallicano (Toskana)"]
 
 # Orte, die auf den DHI-Seiten vorkommen, aber KEIN Ausbildungs- oder
 # Übungsstandort sind — mit der jeweiligen Erklärung. Berlin ist der Fall aus
@@ -77,33 +79,6 @@ KEINE_AUSBILDUNGSSTANDORTE = {
         "bleibt selbstverständlich buchbar. Ältere Kundenstimmen erwähnen Berlin als "
         "früheren Seminarort; eine Ausbildung ist dort heute nicht buchbar."
     ),
-}
-
-# Standortabhängige Preise der Präsenz-Übungstage (DHI 2.0).
-#
-# Hintergrund: Die Ablefy-Produktseite nennt nur EINEN Basispreis (den von
-# Aschaffenburg). Die tatsächlichen Preise je Standort stehen erst auf der
-# Checkout-Seite (Produkt-URL + "/payment"), weil die Übungstage dort als
-# einzelne Standort-Tickets angeboten werden ("Die Preise sind abhängig vom
-# Aufwand und den Extra-Kosten an externen Standorten"). Ohne diese Trennung
-# nannte der Bot für Leipzig und Stuttgart fälschlich den Aschaffenburger Preis.
-#
-# Der tägliche Crawl liest die Standortpreise selbst aus (crawler.
-# fetch_preisvarianten) und legt sie in termine.json unter "preisvarianten" ab.
-# Diese Tabelle ist der FALLBACK, falls der Checkout-Abruf scheitert oder die
-# Seite umgebaut wird — bei einer Preisänderung hier nachziehen.
-# Stand: 01.08.2026 (Checkout-Seiten practice12/practice3 geprüft).
-UEBUNGSTAGE_PREISE_FALLBACK = {
-    "practice12": {
-        "Aschaffenburg": "1.196,00 €",
-        "Leipzig": "1.496,00 €",
-        "Stuttgart": "1.496,00 €",
-    },
-    "practice3": {
-        "Aschaffenburg": "1.196,00 €",
-        "Leipzig": "1.496,00 €",
-        "Stuttgart": "1.496,00 €",
-    },
 }
 
 # Feste Klarstellungen, die NICHT auf der Website stehen, zu denen der Bot aber

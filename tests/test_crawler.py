@@ -27,8 +27,9 @@ from app.config import (  # noqa: E402
 from app.crawler import (  # noqa: E402
     _norm,
     is_placeholder_page,
+    euro,
     load_fixtures,
-    parse_checkout_varianten,
+    parse_shop_html,
     sitemap_urls,
 )
 
@@ -197,165 +198,94 @@ def test_fixtures_enthalten_subdomain_seiten():
     assert kalender.get("seminars")
 
 
-# ── Standortabhängige Preise aus der Checkout-Seite (Befund 01.08.2026) ──────
-# Die Produktseite nennt nur den Basispreis (Aschaffenburg). Wer nach Leipzig
-# oder Stuttgart fragte, bekam deshalb 1.196,00 € statt 1.496,00 € genannt.
+# ── Termine & Preise aus dem Website-Shop (/seminare/, ab Nov. 2026) ─────────
 
-ORTE = {"Aschaffenburg", "Leipzig", "Stuttgart", "Live-Online"}
-CHECKOUT_FIXTURE = (ROOT / "fixtures" / "checkout-practice12.txt").read_text(
-    encoding="utf-8"
-).partition("\n\n")[2]
+SHOP_HTML = (ROOT / "fixtures" / "seminare.html").read_text(encoding="utf-8")
 
 
-def test_checkout_liefert_preis_je_standort():
-    preise = parse_checkout_varianten(CHECKOUT_FIXTURE, ORTE)
-    assert preise == {
-        "Aschaffenburg": "1.196,00 €",
-        "Leipzig": "1.496,00 €",
-        "Stuttgart": "1.496,00 €",
+def _shop_html(*angebote) -> str:
+    import json
+    return ('<html><script type="application/json" id="dhi-public-data999">'
+            + json.dumps(list(angebote)) + "</script></html>")
+
+
+def _angebot(**extra) -> dict:
+    o = {
+        "id": 1, "mode": "presence", "stage": "1+2", "sales_scope238": "1+2",
+        "starts_on238": "2027-01-11", "ends_on238": "2027-01-15",
+        "locations238": {"Aschaffenburg": "Aschaffenburg"},
+        "detail_url": "https://deutsches-hypnoseinstitut.de/seminare/1/",
+        "title223": "11.01.2027 · DHI 1.0 · Vollpräsenz · Stufe 1+2",
+        "bookable252": True,
+        "payment_options252": {
+            "regular": {"total_cents": 359600, "rates": [359600], "label": "Regelpreis"},
+            "rate4": {"total_cents": 341620, "rates": [85405] * 4, "label": "4 Raten · 5 % Finanzvorteil"},
+        },
+        "preeducated_options252": {
+            "rate4": {"total_cents": 304042, "rates": [76012, 76010, 76010, 76010], "label": "4 Raten"},
+        },
     }
+    o.update(extra)
+    return o
 
 
-def test_checkout_ratenbetrag_wandert_nicht_zum_naechsten_standort():
-    """Häufigste Fehlerquelle: Steht unter dem Einmalpreis noch eine Ratenzeile,
-    darf diese nicht als Preis des NÄCHSTEN Standorts gelesen werden."""
-    text = (
-        "Aschaffenburg - 2 Übungstage Stufe 1+2\n1.196,00€\noder 4 Raten à 299,00€\n"
-        "Leipzig - 2 Übungstage Stufe 1+2\n1.496,00€\noder 4 Raten à 374,00€\n"
-        "Stuttgart - 2 Übungstage Stufe 1+2\n1.496,00€\noder 4 Raten à 374,00€\n"
-    )
-    assert parse_checkout_varianten(text, ORTE) == {
-        "Aschaffenburg": "1.196,00 €",
-        "Leipzig": "1.496,00 €",
-        "Stuttgart": "1.496,00 €",
-    }
+def test_euro_schreibweise():
+    assert euro(359600) == "3.596,00 €"
+    assert euro(85405) == "854,05 €"
+    assert euro(650000) == "6.500,00 €"
 
 
-def test_checkout_ordnet_lieber_gar_nicht_zu_als_falsch():
-    """Steht der Preis VOR seiner Überschrift, ist keine sichere Zuordnung
-    möglich. Dann darf der Parser lieber nichts liefern (fetch_preisvarianten
-    nimmt die gepflegte Tabelle) statt einen Ort mit dem falschen Preis."""
-    text = (
-        "1.196,00€\n"
-        "Aschaffenburg - 2 Übungstage DHI 2.0 Stufe 1+2 in Präsenz\n"
-        "1.496,00€\n"
-        "Leipzig - 2 Übungstage DHI 2.0 Stufe 1+2 in Präsenz\n"
-    )
-    treffer = parse_checkout_varianten(text, ORTE)
-    assert treffer.get("Leipzig") != "1.196,00 €"      # keine Verwechslung
-    assert "Stuttgart" not in treffer
+def test_shop_angebot_wird_termin_mit_preisen():
+    s = parse_shop_html(_shop_html(_angebot()))["seminars"][0]
+    assert (s["kind"], s["stage"], s["start"], s["end"]) == ("presence", "1+2", "2027-01-11", "2027-01-15")
+    assert s["location"] == "Aschaffenburg" and s["buchbar"] is True
+    assert s["url"] == "https://deutsches-hypnoseinstitut.de/seminare/1/"
+    assert s["preise"]["regulaer"]["regular"]["gesamt"] == "3.596,00 €"
+    assert s["preise"]["regulaer"]["rate4"]["raten"] == "4 Raten à 854,05 €"
+    assert s["preise"]["regulaer"]["rate4"]["label"] == "4 Raten, 5 % Finanzvorteil"
 
 
-def test_checkout_ignoriert_betraege_vor_dem_ersten_ticket():
-    """Basispreis oder Zwischensumme im Seitenkopf gehören zu keinem Standort."""
-    text = (
-        "DHI2.0 Übungstage der Stufen 1+2\nZwischensumme 1.196,00€\n"
-        "Leipzig - 2 Übungstage Stufe 1+2\n1.496,00€\n"
-    )
-    assert parse_checkout_varianten(text, ORTE) == {"Leipzig": "1.496,00 €"}
+def test_ungleiche_raten_werden_nicht_als_gleich_ausgegeben():
+    """76012 + 3 × 76010: „à 760,12 €" wäre für drei der vier Raten falsch."""
+    s = parse_shop_html(_shop_html(_angebot()))["seminars"][0]
+    assert s["preise"]["vorausgebildet"]["rate4"]["raten"] == (
+        "4 Raten (1. Rate 760,12 €, danach je 760,10 €)")
 
 
-def test_checkout_ignoriert_zeitzone_und_preise_ohne_ort():
-    """„Europe/Berlin" ist kein Standort, und der Basispreis im Seitenkopf hat
-    keinen Ort in der Nähe — beides darf keine Zuordnung erzeugen."""
-    text = "DHI2.0 Übungstage\n1.196,00€\n* incl. VAT\nGo to checkout\nEurope/Berlin\n"
-    assert parse_checkout_varianten(text, ORTE | {"Berlin"}) == {}
+def test_hybrid_hat_mehrere_orte_und_online_ohne_ort_heisst_online():
+    hybrid = _angebot(id=2, mode="hybrid", locations238={"Aschaffenburg": "x", "Leipzig": "y"})
+    online = _angebot(id=3, mode="online", locations238={})
+    s = {x["id"]: x for x in parse_shop_html(_shop_html(hybrid, online))["seminars"]}
+    assert s["2"]["orte"] == ["Aschaffenburg", "Leipzig"]
+    assert s["2"]["location"] == "Aschaffenburg / Leipzig"
+    assert s["3"]["orte"] == ["Online"]
 
 
-def test_checkout_erster_treffer_je_standort_gewinnt():
-    text = (
-        "Leipzig - 2 Übungstage Stufe 1+2\n1.496,00€\n"
-        "Leipzig - Ratenzahlung\n374,00€\n"
-    )
-    assert parse_checkout_varianten(text, ORTE) == {"Leipzig": "1.496,00 €"}
+def test_nicht_buchbares_angebot_bleibt_als_anfrage_erhalten():
+    s = parse_shop_html(_shop_html(_angebot(bookable252=False)))["seminars"][0]
+    assert s["buchbar"] is False
 
 
-def _checkout_html(bloecke: list[tuple[str, str]]) -> bytes:
-    """Minimaler Nachbau einer Ablefy-Checkout-Seite."""
-    inhalt = "".join(
-        f"<div><h3>{ort} - 2 Übungstage DHI 2.0 in Präsenz</h3>"
-        f"<p>Stadtgebiet, {ort}, Germany</p><span>{preis}</span></div>"
-        for ort, preis in bloecke
-    )
-    return f"<html><head><title>Checkout</title></head><body>{inhalt}</body></html>".encode()
+def test_shop_ohne_datenblock_liefert_keine_termine():
+    assert parse_shop_html("<html>umgebaut</html>") == {"seminars": []}
 
 
-_SEMINARE = [
-    {"product_key": "practice12", "location": "Aschaffenburg"},
-    {"product_key": "practice12", "location": "Leipzig"},
-    {"product_key": "practice12", "location": "Stuttgart"},
-    {"product_key": "presence12", "location": "Aschaffenburg"},
-    {"product_key": "hybrid12", "location": "Live-Online"},
-]
-_PRODUKTE = {
-    "practice12": "https://dhi2.de/s/d-hi/uebungstage-12",
-    "presence12": "https://dhi2.de/s/d-hi/vollpraesenz-12",
-    "hybrid12": "https://dhi2.de/s/d-hi/hybrid-12",
-}
+def test_fixture_enthaelt_alle_drei_formate_zum_gleichen_preis():
+    """Lars, 05.11.2026: alle drei Varianten kosten jetzt denselben Betrag."""
+    seminars = parse_shop_html(SHOP_HTML)["seminars"]
+    assert {s["kind"] for s in seminars} == {"presence", "hybrid", "online"}
+    preise_12 = {s["preise"]["regulaer"]["regular"]["gesamt"] for s in seminars if s["stage"] == "1+2"}
+    assert preise_12 == {"3.596,00 €"}
+    vorausgebildet = {s["preise"]["vorausgebildet"]["regular"]["gesamt"] for s in seminars if s["stage"] == "1+2"}
+    assert vorausgebildet == {"3.200,44 €"}  # 11 % Rabatt laut Shop
 
 
-def test_fetch_preisvarianten_holt_nur_mehrort_produkte(monkeypatch):
+def test_leerer_shop_ueberschreibt_vorhandene_termine_nicht(monkeypatch, tmp_path):
+    import json
+
     import app.crawler as cr
-    monkeypatch.setattr(cr, "REQUEST_DELAY", 0)
-    client = _Client({
-        "https://dhi2.de/s/d-hi/uebungstage-12/payment": _checkout_html([
-            ("Aschaffenburg", "1.196,00€"), ("Leipzig", "1.496,00€"), ("Stuttgart", "1.496,00€"),
-        ]),
-    })
-    out = cr.fetch_preisvarianten(client, _PRODUKTE, _SEMINARE)
-    # Vollpräsenz (nur Aschaffenburg) und Live-Online werden gar nicht erst geholt
-    assert set(out) == {"practice12"}
-    assert out["practice12"] == {
-        "Aschaffenburg": "1.196,00 €",
-        "Leipzig": "1.496,00 €",
-        "Stuttgart": "1.496,00 €",
-    }
-
-
-def test_fetch_preisvarianten_faellt_bei_unerreichbarem_checkout_zurueck(monkeypatch):
-    """Kein Checkout erreichbar → gepflegte Tabelle statt Lücke oder Rateversuch."""
-    import app.crawler as cr
-    monkeypatch.setattr(cr, "REQUEST_DELAY", 0)
-    out = cr.fetch_preisvarianten(_Client({}), _PRODUKTE, _SEMINARE)
-    assert out["practice12"]["Leipzig"] == "1.496,00 €"
-
-
-def test_fetch_preisvarianten_nimmt_keine_lueckenhafte_zuordnung(monkeypatch):
-    """Fehlt im Checkout ein Standort, darf keine Teilzuordnung übernommen
-    werden — sonst bekäme Stuttgart am Ende gar keinen oder einen fremden Preis."""
-    import app.crawler as cr
-    monkeypatch.setattr(cr, "REQUEST_DELAY", 0)
-    client = _Client({
-        "https://dhi2.de/s/d-hi/uebungstage-12/payment": _checkout_html([
-            ("Aschaffenburg", "1.196,00€"), ("Leipzig", "1.496,00€"),
-        ]),
-    })
-    out = cr.fetch_preisvarianten(client, _PRODUKTE, _SEMINARE)
-    assert out["practice12"]["Stuttgart"] == "1.496,00 €"   # aus dem Fallback
-    assert len(out["practice12"]) == 3
-
-
-def test_fetch_preisvarianten_ueberlebt_eine_kaputte_checkout_seite(monkeypatch):
-    """Der Crawl läuft nachts unbeaufsichtigt: Eine Fremdseite, die eine
-    Exception auslöst, darf nicht den ganzen Lauf (und damit den Index) kosten."""
-    import app.crawler as cr
-    monkeypatch.setattr(cr, "REQUEST_DELAY", 0)
-
-    class _Kaputt(_Client):
-        def get(self, url, **kw):
-            if url.endswith("/payment"):
-                raise RuntimeError("Verbindung abgebrochen")
-            return super().get(url, **kw)
-
-    out = cr.fetch_preisvarianten(_Kaputt({}), _PRODUKTE, _SEMINARE)
-    assert out["practice12"]["Leipzig"] == "1.496,00 €"   # Fallback greift
-
-
-def test_fixtures_liefern_standortpreise_als_fallback():
-    """Offline (Fixtures) gibt es keine Checkout-Seiten — dann muss die
-    gepflegte Tabelle aus config einspringen, damit Tests und Mock-Betrieb
-    dieselbe Preislogik sehen wie der Live-Bot."""
-    _pages, kalender = load_fixtures()
-    varianten = kalender.get("preisvarianten") or {}
-    assert varianten.get("practice12", {}).get("Leipzig") == "1.496,00 €"
-    assert varianten.get("practice12", {}).get("Aschaffenburg") == "1.196,00 €"
+    monkeypatch.setattr(cr, "DATA_DIR", tmp_path)
+    (tmp_path / "termine.json").write_text(json.dumps({"seminars": [{"id": "alt"}]}))
+    monkeypatch.setattr(cr, "load_fixtures", lambda: ([{"url": "https://x/", "text": "t"}], {"seminars": []}))
+    cr.run(from_fixtures=True)
+    assert json.loads((tmp_path / "termine.json").read_text())["seminars"] == [{"id": "alt"}]

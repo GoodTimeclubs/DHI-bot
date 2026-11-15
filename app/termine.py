@@ -28,7 +28,9 @@ from datetime import date, datetime
 
 from . import retrieval
 
-SEMINARKALENDER_URL = "https://deutsches-hypnoseinstitut.de/seminarkalender.html"
+# Termin- und Buchungsseite (Shop). Die alte seminarkalender.html leitet seit
+# November 2026 in den Checkout um.
+SEMINARKALENDER_URL = "https://deutsches-hypnoseinstitut.de/seminare/"
 
 # Fester Abschluss-Baustein jeder Terminantwort: Das Widget rendert
 # [Beschriftung](URL) als Button — steht der Link in der letzten Zeile, endet
@@ -39,8 +41,8 @@ KALENDER_BUTTON = f"[Alle Termine im Seminarkalender]({SEMINARKALENDER_URL})"
 # um zirkuläre Importe zu vermeiden).
 _KIND_LABEL = {
     "presence": "Vollpräsenz (DHI 1.0)",
-    "hybrid": "Live-Online-Theorie (DHI 2.0)",
-    "practice": "Präsenz-Übungstage (DHI 2.0)",
+    "hybrid": "Live-Hybrid (DHI 2.0)",
+    "online": "Online live (DHI 3.0)",
 }
 
 _MAX_LISTE = 3  # Regel 2 des System-Prompts: höchstens 3 Aufzählungspunkte
@@ -94,18 +96,19 @@ _KEIN_ORT = {
 # („Gibt es Termine in Frankfurt?" → gehört zum LLM, das Alternativen anbietet).
 _ORT_KANDIDAT = re.compile(r"\b(?:in|bei|nach|aus|um)\s+([a-zäöüß][a-zäöüß.\-]+)")
 
+_STAGE_123 = re.compile(r"1\W*\+\W*2\W*\+\W*3|1\W*bis\W*3|komplettausbildung|komplette ausbildung")
+_STAGE_4 = re.compile(r"stufe\W*4\b|expertenseminar")
 _STAGE_12 = re.compile(r"stufe\W*1(\W*(\+|und|&|bis)?\W*2)?\b|stufe\W*2\b|grundausbildung")
 _STAGE_3 = re.compile(r"stufe\W*3\b|masterclass|expertenausbildung|experten-ausbildung")
 
+# Präsenz-Übungstage gibt es nur noch als Teil der DHI 2.0 (Live-Hybrid).
 _KIND_PATTERNS = [
-    ("practice", re.compile(r"[üu]bungs\W?tag|praxis\W?tag|[üu]bungstermine?")),
+    ("hybrid", re.compile(r"hybrid|[üu]bungs\W?tag|praxis\W?tag|[üu]bungstermine?|dhi\W*2(\.0)?\b")),
     ("presence", re.compile(r"voll\W?pr[äa]senz|dhi\W*1(\.0)?\b")),
-    ("hybrid", re.compile(r"hybrid|live\W?online|\bonline\b|dhi\W*2(\.0)?\b")),
+    ("online", re.compile(r"live\W?online|\bonline\b|dhi\W*3(\.0)?\b")),
 ]
 
-# „Kurs/Ausbildung/Seminar startet …" meint den Ausbildungsstart — reine
-# Übungstage sind Praxisbausteine, kein Kursstart. (Greift nur ohne Ortsfilter,
-# damit „Ausbildung in Leipzig" weiterhin die dortigen Übungstage findet.)
+# „Kurs/Ausbildung/Seminar startet …" ist eine Terminfrage über alle Formate.
 _KURS_WORT = re.compile(r"\bkurs\w*|ausbildung\w*|seminar\w*")
 
 
@@ -137,11 +140,16 @@ def _parse(message: str, known_locations: dict[str, str]) -> dict | None:
 
     # Stufe
     s12, s3 = bool(_STAGE_12.search(q)), bool(_STAGE_3.search(q))
-    stage = "1+2" if s12 and not s3 else "3" if s3 and not s12 else None
+    if _STAGE_123.search(q):
+        stage = "1+2+3"
+    elif _STAGE_4.search(q):
+        stage = "4"
+    else:
+        stage = "1+2" if s12 and not s3 else "3" if s3 and not s12 else None
 
-    # „Kurs/Ausbildung" ohne Übungstage-Wort und ohne Ort: Übungstage ausblenden.
+    # „Kurs/Ausbildung" ohne weiteren Filter: alle Formate.
     if not kinds and not location and _KURS_WORT.search(q):
-        kinds = {"presence", "hybrid"}
+        kinds = set(_KIND_LABEL)
 
     if not location and not stage and not kinds:
         return None  # kein konkreter Filter → allgemeine Frage → LLM
@@ -151,10 +159,16 @@ def _parse(message: str, known_locations: dict[str, str]) -> dict | None:
 
 # ── 2 · Termine filtern (deterministisch) ────────────────────────────────────
 
+def _orte(s: dict) -> list[str]:
+    """Alle Orte eines Angebots (DHI 2.0: z.B. Aschaffenburg und Leipzig)."""
+    return s.get("orte") or [s.get("location", "")]
+
+
 def _select(seminars: list[dict], f: dict, today: str) -> list[dict]:
     out = [s for s in seminars if s.get("start", "") >= today]
     if f.get("location"):
-        out = [s for s in out if s.get("location", "").lower() == f["location"].lower()]
+        ort = f["location"].lower()
+        out = [s for s in out if ort in (o.lower() for o in _orte(s))]
     if f.get("stage"):
         out = [s for s in out if s.get("stage") == f["stage"]]
     if f.get("kinds"):
@@ -182,36 +196,41 @@ def _zeile(s: dict, f: dict, fett: bool) -> str:
     label_gezeigt = not (f.get("kinds") and len(f["kinds"]) == 1)
     if label_gezeigt:
         teile.append(_KIND_LABEL.get(s.get("kind", ""), s.get("kind", "?")))
-    teile.append(f"Stufe {s.get('stage', '?')}")
+    stufe = f"Stufe {s.get('stage', '?')}"
+    thema = re.search(r"Stufe 4: ([^·]+)", s.get("title", ""))
+    if thema:  # Expertenseminare: Thema statt nackter Stufe
+        stufe += f": {thema.group(1).strip()}"
+    teile.append(stufe)
     ort = s.get("location", "?")
     # Ort nur, wenn kein Ortsfilter gesetzt ist — und „Live-Online" nicht doppelt
     # zum bereits gezeigten Label „Live-Online-Theorie".
-    if not f.get("location") and not (label_gezeigt and ort == "Live-Online"):
+    if not f.get("location") and not (label_gezeigt and ort in ("Online", "Live-Online")):
         teile.append(ort)
     zeile = " · ".join(teile)
     if s.get("url"):
-        zeile += f" · [Jetzt buchen]({s['url']})"
+        aktion = "Jetzt buchen" if s.get("buchbar", True) else "Details und Anfrage"
+        zeile += f" · [{aktion}]({s['url']})"
     return f"- {zeile}"
 
 
 def _intro(f: dict, treffer: list[dict]) -> str:
     stufe = f" der Stufe {f['stage']}" if f.get("stage") else ""
     ort = f.get("location")
-    if ort and all(s.get("kind") == "practice" for s in treffer):
+    if ort and all(s.get("kind") == "hybrid" for s in treffer):
         return (
             f"In {ort} finden die Präsenz-Übungstage{stufe} der DHI 2.0 Ausbildung "
-            "statt. Die Theorie dazu absolvieren Sie vorab live online. "
-            "Die nächsten Termine:"
+            "statt. Die Theorie dazu absolvieren Sie live online. "
+            "Die nächsten Ausbildungsstarts:"
         )
     if ort:
         return f"Gern, die nächsten Termine{stufe} in {ort}:"
     kinds = f.get("kinds") or set()
-    if kinds == {"practice"}:
-        return f"Gern, die nächsten Präsenz-Übungstage{stufe} (DHI 2.0):"
     if kinds == {"presence"}:
-        return f"Gern, die nächsten Vollpräsenz-Termine{stufe} (DHI 1.0) in Aschaffenburg:"
+        return f"Gern, die nächsten Vollpräsenz-Termine{stufe} (DHI 1.0):"
     if kinds == {"hybrid"}:
-        return f"Gern, die nächsten Live-Online-Theorieblöcke{stufe} (DHI 2.0):"
+        return f"Gern, die nächsten Live-Hybrid-Termine{stufe} (DHI 2.0, Theorie online, Übungstage in Präsenz):"
+    if kinds == {"online"}:
+        return f"Gern, die nächsten Termine{stufe} komplett live online (DHI 3.0):"
     if f.get("stage"):
         return f"Gern, die nächsten Termine für Stufe {f['stage']}:"
     return "Gern, die nächsten passenden Termine:"
@@ -219,8 +238,6 @@ def _intro(f: dict, treffer: list[dict]) -> str:
 
 def _outro(f: dict, treffer: list[dict], weitere: int) -> str:
     saetze = []
-    if (f.get("kinds") or set()) == {"hybrid"}:
-        saetze.append("Die zugehörigen Präsenz-Übungstage buchen Sie separat dazu.")
     if weitere == 1:
         saetze.append("Ein weiterer passender Termin ist bereits geplant.")
     elif weitere > 1:
@@ -262,9 +279,11 @@ def try_answer(message: str, today: str | None = None) -> dict | None:
 
     known = {}
     for s in seminars:
-        loc = s.get("location", "")
-        if loc and loc.lower() != "live-online":
-            known[loc.lower()] = loc
+        for loc in _orte(s):
+            if loc and loc.lower() not in ("online", "live-online"):
+                # „Oberstaufen / Steibis" auch als „Oberstaufen" oder „Steibis"
+                for teil in [loc, *re.split(r"\s*/\s*", loc)]:
+                    known[teil.lower()] = loc
 
     f = _parse(message, known)
     if f is None:

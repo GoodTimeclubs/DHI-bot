@@ -12,22 +12,17 @@ Besucher → widget.js (Chat) → Caddy (HTTPS) → FastAPI /api/chat → BM25-R
                                                         ▲    └→ reine Terminlistenfragen:
      täglicher Crawl (03:10 Uhr) ───────────────────────┘       deterministisch aus termine.json
      ├─ Sitemap: Hauptdomain + 10 Subdomains (Liste s.u.)       (app/termine.py, ohne LLM)
-     ├─ Termine: assets/js/dhi-seminarkalender.js (strukturiert geparst)
-     ├─ Buchungsseiten: dhi2.de (Ablefy) — Preise, Raten, Restplätze
-     └─ Checkout-Seiten (…/payment) — standortabhängige Preise der Übungstage
+     └─ Termine & Preise: Shop /seminare/ (eingebettetes JSON, strukturiert geparst)
 ```
 
-**Standortabhängige Preise (v0.3.2):** Die Ablefy-Produktseite der Präsenz-Übungstage
-nennt nur *einen* Basispreis (den von Aschaffenburg). Tatsächlich kosten die Übungstage
-je nach Ort unterschiedlich viel („Die Preise sind abhängig vom Aufwand und den
-Extra-Kosten an externen Standorten"); die einzelnen Standort-Tickets stehen erst im
-Checkout (Produkt-URL + `/payment`). Der tägliche Crawl liest sie dort aus und legt sie
-in `data/termine.json` unter `preisvarianten` ab; der System-Prompt bekommt daraus einen
-`STANDORTPREISE`-Block und darf einen Ortspreis nie auf einen anderen Ort übertragen.
-Scheitert der Checkout-Abruf oder deckt er nicht alle Standorte des Produkts ab, greift
-die gepflegte Tabelle `UEBUNGSTAGE_PREISE_FALLBACK` in `app/config.py` — **dort bei einer
-Preisänderung nachziehen**. Weicht der Crawl von dieser Tabelle ab, steht ein Hinweis im
-Crawl-Log.
+**Termine & Preise aus dem Website-Shop (Nov. 2026):** Seit das DHI nur noch über die
+eigene Website verkauft (Ablefy gekündigt, `seminarkalender.html` leitet in den Checkout
+um), liest der tägliche Crawl alle Angebote aus `/seminare/`. Die Seite bettet sie als
+JSON ein (`<script id="dhi-public-data…">`): Termine, Orte, Buchbarkeit und die Preise
+jeder Zahlweise, auch für DHI-Vorausgebildete (11 % Rabatt). Der PREISDATEN-Block im
+System-Prompt wird daraus erzeugt, der Bot rechnet nie selbst und nennt bei jedem
+Ausbildungspreis die Rabatte mit. Liefert der Shop einmal 0 Angebote, bleibt die
+`termine.json` vom letzten erfolgreichen Lauf erhalten.
 
 **Deterministische Terminantworten (v0.2.3, QS-Befund 8):** Eindeutige
 Terminlistenfragen („Welche Übungstage gibt es in Stuttgart?") beantwortet der Bot
@@ -57,8 +52,7 @@ Der tägliche Crawl liest die Hauptdomain und alle DHI-Subdomains ein
 | experte.… | Experten |
 | legal.… | Rechtliches — hier erscheinen später die neuen AGB |
 
-Dazu kommen wie bisher der Seminarkalender (`dhi-seminarkalender.js`) und die
-sechs Ablefy-Buchungsseiten auf dhi2.de.
+Dazu kommen die Angebotsdaten aus dem Shop (`/seminare/`) mit Terminen und Preisen.
 
 Noch unbefüllte Subdomains sind unkritisch: Hoster-Platzhalterseiten (z.B. die
 Hostinger-Default-Seite, die legal.… bis zum Einstellen der AGB zeigt) erkennt
@@ -119,14 +113,13 @@ Unit-Tests abgesichert:
 
 | Konstante | Wofür |
 |---|---|
-| `AUSBILDUNGSSTANDORTE` | Orte mit festen Terminen im Kalender (Aschaffenburg, Leipzig, Stuttgart) |
-| `UEBUNGSSTANDORTE_AUF_ANFRAGE` | Verfügbare Übungsstandorte ohne feste Termine (Hamburg, Oberstaufen-Steibis, Gallicano) — dürfen nie verneint werden |
+| `AUSBILDUNGSSTANDORTE` | Rückfallliste der Orte mit festen Terminen; im Betrieb kommen die Orte direkt aus den Shop-Daten |
+| `UEBUNGSSTANDORTE_AUF_ANFRAGE` | Verfügbare Übungsstandorte ohne feste Termine (Gallicano) — dürfen nie verneint werden |
 | `KEINE_AUSBILDUNGSSTANDORTE` | Orte, die *keine* Ausbildungs- oder Übungsstandorte sind, mit Erklärung — aktuell nur **Berlin** (dort nur die DHI-Hypnosepraxis). Ohne diesen Hinweis las das Modell aus alten Kundenstimmen einen Standort heraus. |
-| `UEBUNGSTAGE_PREISE_FALLBACK` | Standortpreise der Übungstage als Rückfallebene zum Checkout-Crawl |
 | `KLARSTELLUNGEN` | Verbindliche Aussagen, die nicht auf der Website stehen (z.B. zur Zusammenarbeit mit einzelnen Personen). Wörtlich übernommen, erweiterbar um weitere Einträge `{thema, aussage}`. |
 
 Verhaltensregeln, die dazugehören, stehen im System-Prompt (`app/llm.py`):
-Standortpreise nie auf einen anderen Ort übertragen (Regel 6), Terminantworten
+bei jedem Ausbildungspreis die Rabatte mitnennen (Regel 6), Terminantworten
 enden mit dem Button zur Terminseite (Regel 5), Nicht-Standorte klar verneinen
 und Alternative anbieten (Regel 11), bei unklarem Anliegen erst eine Rückfrage
 „Ausbildung oder Hypnose für sich selbst?" (Regel 12) und bei Skepsis aktiv das
@@ -207,13 +200,11 @@ Drei Test-Ebenen liegen unter `tests/` (Einrichtung: `pip install -r requirement
    stehen im Standard-Crawl, die Platzhalter-Erkennung greift (und lässt
    künftige echte legal-Inhalte durch), Sitemap-Parsing inkl. Sitemap-Index
    und gzip funktioniert; der System-Prompt enthält die Kernregeln
-   (Link-Pflichten, Preis-Trennung, Praxen-Baustein), der PREISDATEN-Block
-   erfasst auch neue Ablefy-Produkte, und das Retrieval boostet
-   Buchungsseiten bei Ausbildungs- (nicht aber bei Sitzungs-)Preisfragen.
-   Seit v0.3.2 zusätzlich: der Checkout-Parser ordnet jedem Standort seinen
-   eigenen Preis zu (layoutunabhängig, mit Fallback auf die Tabelle in
-   `config.py`), jede deterministische Terminantwort endet mit dem Button zur
-   Terminseite, und die verbindlichen Klarstellungen stehen wörtlich im Prompt.
+   (Link-Pflichten, Preis-Trennung, Praxen-Baustein, Rabatte), der Shop-Parser
+   übernimmt Termine und alle Zahlweisen samt Vorausgebildeten-Preisen, der
+   PREISDATEN-Block fasst gleich teure Formate zusammen, jede deterministische
+   Terminantwort endet mit dem Button zur Terminseite, und die verbindlichen
+   Klarstellungen stehen wörtlich im Prompt.
 
 1. **Testkatalog** — 59 Beispielfragen mit Soll-Verhalten (Inhalte, Termine, Preise,
    Buchung, Grenzfälle wie Gesundheitsfragen, Heilversprechen, Off-Topic,
