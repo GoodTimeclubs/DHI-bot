@@ -8,20 +8,24 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, Header, HTTPException, Request
+from urllib.parse import urlsplit
+
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import crawler, indexer, llm, retrieval
+from . import anfragelog, crawler, indexer, llm, retrieval
 from .config import (
     ADMIN_TOKEN,
     ALLOWED_ORIGINS,
+    ANFRAGEN_LOG,
     ANTHROPIC_API_KEY_TEST,
     ANTHROPIC_MODEL,
     CONTACT,
     CRAWL_HOUR,
     CRAWL_ON_START,
+    DASHBOARD_TOKEN,
     DAILY_MESSAGE_LIMIT,
     DATA_DIR,
     DETERMINISTIC_TERMINE,
@@ -152,6 +156,19 @@ _LIMIT_REPLY = (
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=1500)
     history: list[dict] = Field(default_factory=list, max_length=20)
+    # Zufalls-ID des Widgets pro Seitenaufruf — gruppiert nur das Anfrage-Log
+    conversation_id: str = Field(default="", max_length=64)
+
+
+def _protokollieren(body: ChatIn, request: Request, antwort: str, art: str) -> None:
+    """Anonymer Log-Eintrag fürs Dashboard; darf den Chat nie stören."""
+    if not ANFRAGEN_LOG:
+        return
+    seite = urlsplit(request.headers.get("origin") or request.headers.get("referer") or "").hostname
+    try:
+        anfragelog.speichern(body.conversation_id, seite or "", body.message, antwort, art)
+    except Exception as e:  # noqa: BLE001
+        print(f"!! Anfrage-Log fehlgeschlagen: {type(e).__name__}: {e}")
 
 
 @app.post("/api/chat")
@@ -177,10 +194,17 @@ def chat(body: ChatIn, request: Request, x_dhi_test: str = Header(default="")):
             "mock": MOCK_LLM,
         }
     try:
-        return llm.answer(body.message, body.history, api_key=qs_key)
+        result = llm.answer(body.message, body.history, api_key=qs_key)
     except Exception as e:  # noqa: BLE001
         print(f"!! Chat-Fehler: {type(e).__name__}: {e}")
+        if qs_key is None:
+            _protokollieren(body, request, f"(Fehler: {type(e).__name__})", "fehler")
         raise HTTPException(502, "Antwort derzeit nicht möglich, bitte später erneut versuchen.")
+    # QS-Läufe nicht protokollieren — das Dashboard zeigt nur echte Besucher
+    if qs_key is None:
+        art = "mock" if result.get("mock") else "termine" if result.get("deterministic") else "llm"
+        _protokollieren(body, request, result["reply"], art)
+    return result
 
 
 @app.get("/api/health")
@@ -222,12 +246,52 @@ def termine():
     return FileResponse(pfad, media_type="application/json")
 
 
+def _admin(x_admin_token: str) -> None:
+    if not ADMIN_TOKEN or not secrets.compare_digest(x_admin_token, ADMIN_TOKEN):
+        raise HTTPException(403, "Ungültiger Admin-Token.")
+
+
 @app.post("/api/reindex")
 def reindex(x_admin_token: str = Header(default="")):
-    if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:
-        raise HTTPException(403, "Ungültiger Admin-Token.")
+    _admin(x_admin_token)
     threading.Thread(target=crawl_and_index, daemon=True).start()
     return {"status": "Re-Crawl gestartet (läuft im Hintergrund)."}
+
+
+def _dashboard(x_dashboard_token: str) -> None:
+    # Bewusst NICHT mit ADMIN_TOKEN: Lesezugriff aufs Log und Re-Crawl sind getrennt.
+    if not DASHBOARD_TOKEN or not secrets.compare_digest(x_dashboard_token, DASHBOARD_TOKEN):
+        raise HTTPException(403, "Ungültiger Dashboard-Token.")
+
+
+@app.get("/api/dashboard/anfragen")
+def dashboard_anfragen(
+    x_dashboard_token: str = Header(default=""),
+    tage: int = Query(30, ge=1, le=365),
+    suche: str = Query("", max_length=100),
+):
+    """Auswertung fürs Dashboard: Kennzahlen + neueste anonymisierte Anfragen."""
+    _dashboard(x_dashboard_token)
+    return anfragelog.auswertung(tage=tage, suche=suche)
+
+
+@app.delete("/api/dashboard/anfragen/{eintrag_id}")
+def dashboard_loeschen(eintrag_id: int, x_dashboard_token: str = Header(default="")):
+    """Einzelnen Eintrag löschen (z. B. wenn jemand doch Personendaten eingetippt hat)."""
+    _dashboard(x_dashboard_token)
+    if not anfragelog.loeschen(eintrag_id):
+        raise HTTPException(404, "Eintrag nicht gefunden.")
+    return {"status": "gelöscht"}
+
+
+@app.get("/dashboard")
+def dashboard_seite():
+    # Die Seite selbst enthält keine Daten — die lädt sie erst mit dem Dashboard-Token.
+    return FileResponse(
+        STATIC / "dashboard.html",
+        headers={"X-Robots-Tag": "noindex, nofollow", "Cache-Control": "no-store",
+                 "Referrer-Policy": "no-referrer"},
+    )
 
 
 @app.get("/")

@@ -140,7 +140,7 @@
       <textarea placeholder="Ihre Frage…" rows="1" maxlength="1500"></textarea>
       <button title="Senden">➤</button>
     </div>
-    <div class="foot">KI-Assistent · Antworten automatisiert &amp; ohne Gewähr · bitte keine sensiblen Gesundheitsdaten eingeben</div>
+    <div class="foot">KI-Assistent · Antworten automatisiert &amp; ohne Gewähr · Fragen werden anonym ausgewertet · bitte keine Namen, Kontakt- oder Gesundheitsdaten eingeben</div>
   </div>`;
 
   const btn = root.querySelector(".btn");
@@ -169,6 +169,10 @@
 
   const history = [];
   let busy = false;
+  // Zufalls-ID pro Seitenaufruf, nur im Arbeitsspeicher (kein Cookie/Storage):
+  // gruppiert im anonymen Anfrage-Log die Fragen eines Gesprächs.
+  const CONV_ID = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   // Mini-Renderer: [Beschriftung](URL) und nackte URLs werden zu Button-Links,
@@ -233,7 +237,7 @@
       const r = await fetch(API + "/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history }),
+        body: JSON.stringify({ message: text, history, conversation_id: CONV_ID }),
       });
       const data = await r.json();
       const reply = r.ok ? (data.reply || "(leere Antwort)") : (data.detail || "Fehler " + r.status);
