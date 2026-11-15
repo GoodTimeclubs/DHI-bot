@@ -101,6 +101,9 @@ docker compose up
 | `GET /api/health` | Status: Index-Größe, Termine, Modell, Mock-Modus |
 | `GET /api/termine` | Terminstand, aus dem der Bot antwortet (Solldaten für den QS-Lauf) |
 | `POST /api/reindex` | Manueller Re-Crawl (Header `X-Admin-Token: <ADMIN_TOKEN>`) |
+| `GET /admin` | Anfragen-Dashboard (anonym, Login mit `ADMIN_TOKEN`), siehe unten |
+| `GET /api/admin/anfragen` | Daten fürs Dashboard (Header `X-Admin-Token`) |
+| `DELETE /api/admin/anfragen/{id}` | Einzelnen Log-Eintrag löschen (Header `X-Admin-Token`) |
 
 ➜ **Ausführliche API-Dokumentation mit Beispielen (curl/PowerShell/JS): [API.md](API.md)**
    Interaktive Swagger-Übersicht im Betrieb unter `/docs`.
@@ -130,6 +133,35 @@ Zur Rückfrage-Regel gehört ein Gegenstück im deterministischen Terminpfad:
 eine Hypnose, wann haben Sie in Aschaffenburg einen Termin?") bewusst ans LLM,
 damit dort nachgefragt statt geraten wird.
 
+## Anfragen-Dashboard (`/admin`)
+
+Unter `https://BOT-DOMAIN/admin` sieht der Auftraggeber, **was** im Chat gefragt
+und geantwortet wird: Kennzahlen, Fragen pro Tag, Themen, auf welcher DHI-Seite
+gefragt wurde, und die einzelnen Fragen mit Antwort (Suche, Gesprächsfilter,
+CSV-Export, Löschen einzelner Einträge). Anmeldung mit dem `ADMIN_TOKEN` aus der
+`.env`; der Token liegt nur im jeweiligen Browser-Tab.
+
+**Wer** fragt, zeigt das Dashboard bewusst nicht, denn die Auswertung ist anonym:
+
+- **Keine IP-Adressen, User-Agents, Cookies oder Geräte-Kennungen.** Fragen eines
+  Gesprächs gruppiert eine Zufalls-ID, die das Widget pro Seitenaufruf nur im
+  Arbeitsspeicher erzeugt (kein Cookie, kein localStorage → keine Einwilligung
+  nach § 25 TDDDG nötig). Nach dem Neuladen der Seite gibt es eine neue ID.
+- **Kontaktdaten werden vor dem Speichern geschwärzt** (E-Mail, Telefon, IBAN).
+  Namen im Freitext erkennt der Filter nicht; der Widget-Fuß bittet deshalb
+  ausdrücklich, keine Namen, Kontakt- oder Gesundheitsdaten einzugeben. Einträge
+  mit trotzdem eingegebenen Personendaten lassen sich im Dashboard löschen.
+- **Speicherbegrenzung:** Einträge werden nach `ANFRAGEN_AUFBEWAHRUNG_TAGE`
+  (Standard 90) automatisch gelöscht. `ANFRAGEN_LOG=0` schaltet das Log ganz ab.
+- QS-Läufe (`X-DHI-Test`) werden nicht protokolliert.
+- Die Daten liegen nur auf dem Bot-Server (`data/anfragen.db`, SQLite); die
+  Dashboard-Seite lädt nichts von Dritten.
+
+Vor dem Livegang: **Datenschutzerklärung der Website ergänzen** (Zweck:
+Verbesserung des Chat-Angebots; Rechtsgrundlage: berechtigtes Interesse,
+Art. 6 Abs. 1 lit. f DSGVO; Speicherdauer 90 Tage; Empfänger: Anthropic als
+Auftragsverarbeiter für die Antworterzeugung).
+
 ## Wichtige Einstellungen (`.env`)
 
 - `ANTHROPIC_API_KEY` — ohne Key: Mock-Modus
@@ -143,6 +175,8 @@ damit dort nachgefragt statt geraten wird.
 - `DETERMINISTIC_TERMINE` — `1` (Standard): reine Terminlistenfragen deterministisch
   aus `termine.json` beantworten statt per LLM-Auswahl (QS-Befund 8); `0` = aus
 - `ALLOWED_ORIGINS` — für den Produktivbetrieb auf die Website-Domains einschränken
+- `ANFRAGEN_LOG` / `ANFRAGEN_AUFBEWAHRUNG_TAGE` — anonymes Anfrage-Log fürs
+  Dashboard an/aus (Standard `1`) und Löschfrist in Tagen (Standard 90)
 - `DOMAIN` — leer = lokal (`http://localhost`); produktiv die Bot-Domain eintragen,
   Caddy holt dann automatisch TLS-Zertifikate (Let's Encrypt)
 
@@ -257,7 +291,8 @@ Ergebnisse und behobene Befunde des QS-Laufs vom 30.07.2026: siehe
   Crawl scheiterte dort mit PermissionError. Inhalt ansehen:
   `docker compose exec dhi-bot cat /app/data/meta.json`
 - **XSS-Schutz im Widget** (HTML-Escaping + Shadow DOM), API-Key nur serverseitig in `.env`,
-  Chats werden serverseitig nicht gespeichert.
+  Chats werden nur anonymisiert fürs Dashboard gespeichert (ohne IP, Kontaktdaten
+  geschwärzt, Löschung nach 90 Tagen), siehe „Anfragen-Dashboard".
 - **Produktiv-Checkliste**: `DOMAIN` in `.env` setzen (HTTPS übernimmt der mitlaufende Caddy),
   `ALLOWED_ORIGINS` auf die DHI-Domains setzen, `ADMIN_TOKEN` ändern, AVV mit Anthropic
   abschließen, Datenschutzerklärung der Website ergänzen.
@@ -267,5 +302,6 @@ Ergebnisse und behobene Befunde des QS-Laufs vom 30.07.2026: siehe
 - BM25-Volltextsuche statt Embeddings (auch bei einigen hundert Seiten gut
   brauchbar; Embeddings
   lassen sich später in `indexer.py`/`retrieval.py` ergänzen).
-- Chats werden **nicht gespeichert** (nur flüchtig im Browser-Tab) — datenschutzfreundlich.
+- Das Anfrage-Log schwärzt nur maschinenlesbare Kontaktdaten (E-Mail, Telefon,
+  IBAN), keine Namen oder Adressen im Freitext.
 - Rate-Limit in-memory (20 Nachrichten / 5 Min / IP).

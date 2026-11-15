@@ -139,6 +139,12 @@ TIMEZONE = os.getenv("TZ", "Europe/Berlin")
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 
+# Anonymes Anfrage-Log fürs Admin-Dashboard (/admin, siehe app/anfragelog.py):
+# Frage + Antwort ohne IP, Cookies oder Geräte-Kennung; Kontaktdaten geschwärzt.
+# 0 = nichts speichern. Einträge werden nach der Aufbewahrungsfrist gelöscht.
+ANFRAGEN_LOG = os.getenv("ANFRAGEN_LOG", "1").lower() in ("1", "true", "yes")
+ANFRAGEN_AUFBEWAHRUNG_TAGE = int(os.getenv("ANFRAGEN_AUFBEWAHRUNG_TAGE", "90"))
+
 # Hinter einem Reverse Proxy (nginx/Caddy) auf 1 setzen: dann wird die echte
 # Besucher-IP aus X-Forwarded-For gelesen (letzter Eintrag = vom Proxy gesetzt).
 TRUST_PROXY = os.getenv("TRUST_PROXY", "").lower() in ("1", "true", "yes")

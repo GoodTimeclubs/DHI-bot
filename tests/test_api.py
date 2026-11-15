@@ -164,3 +164,62 @@ def test_qs_anfragen_umgehen_rate_limit_und_tageslimit(qs, monkeypatch):
     # Echte Besucher haben ihr Kontingent dadurch unverändert zur Verfügung.
     echt = client.post("/api/chat", json={"message": "Was kostet die Stufe 3?"})
     assert echt.json()["reply"] != main._LIMIT_REPLY
+
+
+# ── Anonymes Anfrage-Log + Admin-Dashboard ──────────────────────────────────
+
+@pytest.fixture
+def log(tmp_path, monkeypatch, qs):
+    """Log in eine Wegwerf-DB, Admin-Token gesetzt, llm.answer gefälscht (qs)."""
+    monkeypatch.setattr(main.anfragelog, "DB", tmp_path / "anfragen.db")
+    monkeypatch.setattr(main, "ANFRAGEN_LOG", True)
+    monkeypatch.setattr(main, "ADMIN_TOKEN", "admin-geheim")
+    return {"X-Admin-Token": "admin-geheim"}
+
+
+def test_chat_wird_anonym_protokolliert(log):
+    r = client.post(
+        "/api/chat",
+        json={"message": "Was kostet das? max@web.de", "conversation_id": "abc-123"},
+        headers={"Origin": "https://hybrid.deutsches-hypnoseinstitut.de"},
+    )
+    assert r.status_code == 200
+    d = client.get("/api/admin/anfragen", headers=log).json()
+    assert d["gesamt"] == 1
+    eintrag = d["anfragen"][0]
+    assert eintrag["frage"] == "Was kostet das? [E-Mail]"
+    assert eintrag["antwort"] == "Antwort."
+    assert eintrag["seite"] == "hybrid.deutsches-hypnoseinstitut.de"
+    assert eintrag["gespraech"] == "abc-123"
+    assert "testclient" not in str(eintrag)  # Client-Adresse des TestClient
+
+
+def test_qs_anfragen_werden_nicht_protokolliert(log):
+    client.post("/api/chat", json={"message": "QS"}, headers={"X-DHI-Test": "qs-geheim"})
+    assert client.get("/api/admin/anfragen", headers=log).json()["gesamt"] == 0
+
+
+def test_ohne_schalter_wird_nichts_protokolliert(log, monkeypatch):
+    monkeypatch.setattr(main, "ANFRAGEN_LOG", False)
+    client.post("/api/chat", json={"message": "Hallo"})
+    assert client.get("/api/admin/anfragen", headers=log).json()["gesamt"] == 0
+
+
+def test_admin_api_braucht_token(log):
+    assert client.get("/api/admin/anfragen").status_code == 403
+    assert client.get("/api/admin/anfragen", headers={"X-Admin-Token": "falsch"}).status_code == 403
+    assert client.delete("/api/admin/anfragen/1").status_code == 403
+
+
+def test_admin_eintrag_loeschen(log):
+    client.post("/api/chat", json={"message": "Hallo"})
+    eid = client.get("/api/admin/anfragen", headers=log).json()["anfragen"][0]["id"]
+    assert client.delete(f"/api/admin/anfragen/{eid}", headers=log).status_code == 200
+    assert client.delete(f"/api/admin/anfragen/{eid}", headers=log).status_code == 404
+
+
+def test_admin_seite_ohne_daten_und_noindex():
+    r = client.get("/admin")
+    assert r.status_code == 200
+    assert "noindex" in r.headers["x-robots-tag"]
+    assert "Admin-Token" in r.text
