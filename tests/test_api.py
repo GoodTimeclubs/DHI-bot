@@ -173,8 +173,9 @@ def log(tmp_path, monkeypatch, qs):
     """Log in eine Wegwerf-DB, Admin-Token gesetzt, llm.answer gefälscht (qs)."""
     monkeypatch.setattr(main.anfragelog, "DB", tmp_path / "anfragen.db")
     monkeypatch.setattr(main, "ANFRAGEN_LOG", True)
+    monkeypatch.setattr(main, "DASHBOARD_TOKEN", "dashboard-geheim")
     monkeypatch.setattr(main, "ADMIN_TOKEN", "admin-geheim")
-    return {"X-Admin-Token": "admin-geheim"}
+    return {"X-Dashboard-Token": "dashboard-geheim"}
 
 
 def test_chat_wird_anonym_protokolliert(log):
@@ -184,7 +185,7 @@ def test_chat_wird_anonym_protokolliert(log):
         headers={"Origin": "https://hybrid.deutsches-hypnoseinstitut.de"},
     )
     assert r.status_code == 200
-    d = client.get("/api/admin/anfragen", headers=log).json()
+    d = client.get("/api/dashboard/anfragen", headers=log).json()
     assert d["gesamt"] == 1
     eintrag = d["anfragen"][0]
     assert eintrag["frage"] == "Was kostet das? [E-Mail]"
@@ -196,30 +197,40 @@ def test_chat_wird_anonym_protokolliert(log):
 
 def test_qs_anfragen_werden_nicht_protokolliert(log):
     client.post("/api/chat", json={"message": "QS"}, headers={"X-DHI-Test": "qs-geheim"})
-    assert client.get("/api/admin/anfragen", headers=log).json()["gesamt"] == 0
+    assert client.get("/api/dashboard/anfragen", headers=log).json()["gesamt"] == 0
 
 
 def test_ohne_schalter_wird_nichts_protokolliert(log, monkeypatch):
     monkeypatch.setattr(main, "ANFRAGEN_LOG", False)
     client.post("/api/chat", json={"message": "Hallo"})
-    assert client.get("/api/admin/anfragen", headers=log).json()["gesamt"] == 0
+    assert client.get("/api/dashboard/anfragen", headers=log).json()["gesamt"] == 0
 
 
-def test_admin_api_braucht_token(log):
-    assert client.get("/api/admin/anfragen").status_code == 403
-    assert client.get("/api/admin/anfragen", headers={"X-Admin-Token": "falsch"}).status_code == 403
-    assert client.delete("/api/admin/anfragen/1").status_code == 403
+def test_dashboard_api_braucht_eigenen_token(log):
+    assert client.get("/api/dashboard/anfragen").status_code == 403
+    falsch = {"X-Dashboard-Token": "falsch"}
+    assert client.get("/api/dashboard/anfragen", headers=falsch).status_code == 403
+    assert client.delete("/api/dashboard/anfragen/1").status_code == 403
+    # Der Admin-Token (Re-Crawl) öffnet das Dashboard nicht — und umgekehrt
+    for kopf in ({"X-Dashboard-Token": "admin-geheim"}, {"X-Admin-Token": "admin-geheim"}):
+        assert client.get("/api/dashboard/anfragen", headers=kopf).status_code == 403
+    assert client.post("/api/reindex", headers={"X-Admin-Token": "dashboard-geheim"}).status_code == 403
 
 
-def test_admin_eintrag_loeschen(log):
+def test_dashboard_ohne_token_konfiguration_gesperrt(log, monkeypatch):
+    monkeypatch.setattr(main, "DASHBOARD_TOKEN", "")
+    assert client.get("/api/dashboard/anfragen", headers={"X-Dashboard-Token": ""}).status_code == 403
+
+
+def test_dashboard_eintrag_loeschen(log):
     client.post("/api/chat", json={"message": "Hallo"})
-    eid = client.get("/api/admin/anfragen", headers=log).json()["anfragen"][0]["id"]
-    assert client.delete(f"/api/admin/anfragen/{eid}", headers=log).status_code == 200
-    assert client.delete(f"/api/admin/anfragen/{eid}", headers=log).status_code == 404
+    eid = client.get("/api/dashboard/anfragen", headers=log).json()["anfragen"][0]["id"]
+    assert client.delete(f"/api/dashboard/anfragen/{eid}", headers=log).status_code == 200
+    assert client.delete(f"/api/dashboard/anfragen/{eid}", headers=log).status_code == 404
 
 
-def test_admin_seite_ohne_daten_und_noindex():
-    r = client.get("/admin")
+def test_dashboard_seite_ohne_daten_und_noindex():
+    r = client.get("/dashboard")
     assert r.status_code == 200
     assert "noindex" in r.headers["x-robots-tag"]
-    assert "Admin-Token" in r.text
+    assert "Dashboard-Token" in r.text

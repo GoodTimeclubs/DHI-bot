@@ -25,6 +25,7 @@ from .config import (
     CONTACT,
     CRAWL_HOUR,
     CRAWL_ON_START,
+    DASHBOARD_TOKEN,
     DAILY_MESSAGE_LIMIT,
     DATA_DIR,
     DETERMINISTIC_TERMINE,
@@ -257,31 +258,37 @@ def reindex(x_admin_token: str = Header(default="")):
     return {"status": "Re-Crawl gestartet (läuft im Hintergrund)."}
 
 
-@app.get("/api/admin/anfragen")
-def admin_anfragen(
-    x_admin_token: str = Header(default=""),
+def _dashboard(x_dashboard_token: str) -> None:
+    # Bewusst NICHT mit ADMIN_TOKEN: Lesezugriff aufs Log und Re-Crawl sind getrennt.
+    if not DASHBOARD_TOKEN or not secrets.compare_digest(x_dashboard_token, DASHBOARD_TOKEN):
+        raise HTTPException(403, "Ungültiger Dashboard-Token.")
+
+
+@app.get("/api/dashboard/anfragen")
+def dashboard_anfragen(
+    x_dashboard_token: str = Header(default=""),
     tage: int = Query(30, ge=1, le=365),
     suche: str = Query("", max_length=100),
 ):
     """Auswertung fürs Dashboard: Kennzahlen + neueste anonymisierte Anfragen."""
-    _admin(x_admin_token)
+    _dashboard(x_dashboard_token)
     return anfragelog.auswertung(tage=tage, suche=suche)
 
 
-@app.delete("/api/admin/anfragen/{eintrag_id}")
-def admin_loeschen(eintrag_id: int, x_admin_token: str = Header(default="")):
+@app.delete("/api/dashboard/anfragen/{eintrag_id}")
+def dashboard_loeschen(eintrag_id: int, x_dashboard_token: str = Header(default="")):
     """Einzelnen Eintrag löschen (z. B. wenn jemand doch Personendaten eingetippt hat)."""
-    _admin(x_admin_token)
+    _dashboard(x_dashboard_token)
     if not anfragelog.loeschen(eintrag_id):
         raise HTTPException(404, "Eintrag nicht gefunden.")
     return {"status": "gelöscht"}
 
 
-@app.get("/admin")
-def admin_seite():
-    # Die Seite selbst enthält keine Daten — die lädt sie erst mit dem Admin-Token.
+@app.get("/dashboard")
+def dashboard_seite():
+    # Die Seite selbst enthält keine Daten — die lädt sie erst mit dem Dashboard-Token.
     return FileResponse(
-        STATIC / "admin.html",
+        STATIC / "dashboard.html",
         headers={"X-Robots-Tag": "noindex, nofollow", "Cache-Control": "no-store",
                  "Referrer-Policy": "no-referrer"},
     )

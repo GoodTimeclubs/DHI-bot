@@ -138,8 +138,11 @@ TIMEZONE = os.getenv("TZ", "Europe/Berlin")
 
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+# Eigener Token nur fürs Anfragen-Dashboard (/dashboard): Der Auftraggeber kann
+# mitlesen, ohne damit Re-Crawls auslösen zu können. Leer = Dashboard gesperrt.
+DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "").strip()
 
-# Anonymes Anfrage-Log fürs Admin-Dashboard (/admin, siehe app/anfragelog.py):
+# Anonymes Anfrage-Log fürs Dashboard (/dashboard, siehe app/anfragelog.py):
 # Frage + Antwort ohne IP, Cookies oder Geräte-Kennung; Kontaktdaten geschwärzt.
 # 0 = nichts speichern. Einträge werden nach der Aufbewahrungsfrist gelöscht.
 ANFRAGEN_LOG = os.getenv("ANFRAGEN_LOG", "1").lower() in ("1", "true", "yes")

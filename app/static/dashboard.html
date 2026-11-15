@@ -65,7 +65,7 @@
 <div id="login" class="karte">
   <h2>Anmelden</h2>
   <form id="loginform">
-    <label for="token">Admin-Token</label>
+    <label for="token">Dashboard-Token</label>
     <input id="token" type="password" autocomplete="current-password" required>
     <button type="submit">Anzeigen</button>
     <p class="fehlermeldung" id="loginfehler" role="alert"></p>
@@ -112,12 +112,12 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   // Token nur für diesen Tab (sessionStorage) — weg, sobald der Tab zu ist.
-  const store = { get: () => { try { return sessionStorage.getItem("dhiAdmin") || ""; } catch { return ""; } },
-                  set: (t) => { try { t ? sessionStorage.setItem("dhiAdmin", t) : sessionStorage.removeItem("dhiAdmin"); } catch {} } };
+  const store = { get: () => { try { return sessionStorage.getItem("dhiDashboard") || ""; } catch { return ""; } },
+                  set: (t) => { try { t ? sessionStorage.setItem("dhiDashboard", t) : sessionStorage.removeItem("dhiDashboard"); } catch {} } };
   let token = store.get(), daten = null, gespraech = "";
 
   async function api(pfad, opts = {}) {
-    const r = await fetch(pfad, { ...opts, headers: { "X-Admin-Token": token } });
+    const r = await fetch(pfad, { ...opts, headers: { "X-Dashboard-Token": token } });
     if (r.status === 403) { abmelden("Token ungültig."); throw new Error("403"); }
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
@@ -169,7 +169,7 @@
   async function laden() {
     const zeitraum = +$("zeitraum").value;
     const q = new URLSearchParams({ tage: zeitraum, suche: $("suche").value.trim() });
-    daten = await api("/api/admin/anfragen?" + q);
+    daten = await api("/api/dashboard/anfragen?" + q);
     $("login").hidden = true; $("app").hidden = false; $("abmelden").hidden = false;
     $("k-gesamt").textContent = daten.gesamt;
     $("k-gespraeche").textContent = daten.gespraeche;
@@ -205,7 +205,7 @@
     const g = e.target.closest(".gid"), x = e.target.closest(".x");
     if (g) { gespraech = g.dataset.g; tabelle(); }
     if (x && confirm("Diesen Eintrag endgültig löschen?")) {
-      await api("/api/admin/anfragen/" + x.dataset.id, { method: "DELETE" });
+      await api("/api/dashboard/anfragen/" + x.dataset.id, { method: "DELETE" });
       laden();
     }
   };

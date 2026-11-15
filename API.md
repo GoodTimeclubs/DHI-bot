@@ -18,9 +18,9 @@ Eine interaktive Übersicht (Swagger UI) liefert FastAPI automatisch unter
 | `GET` | `/api/termine` | Terminstand, aus dem der Bot antwortet | keine |
 | `POST` | `/api/chat` mit `X-DHI-Test` | wie oben, aber über den QS-Schlüssel | `X-DHI-Test` |
 | `POST` | `/api/reindex` | Website neu crawlen + Index neu bauen | `X-Admin-Token` |
-| `GET` | `/api/admin/anfragen` | Anonymes Anfrage-Log: Kennzahlen + Einträge | `X-Admin-Token` |
-| `DELETE` | `/api/admin/anfragen/{id}` | Einen Log-Eintrag löschen | `X-Admin-Token` |
-| `GET` | `/admin` | Anfragen-Dashboard (lädt Daten erst nach Token-Eingabe) | keine |
+| `GET` | `/api/dashboard/anfragen` | Anonymes Anfrage-Log: Kennzahlen + Einträge | `X-Dashboard-Token` |
+| `DELETE` | `/api/dashboard/anfragen/{id}` | Einen Log-Eintrag löschen | `X-Dashboard-Token` |
+| `GET` | `/dashboard` | Anfragen-Dashboard (lädt Daten erst nach Token-Eingabe) | keine |
 | `GET` | `/` | Demo-Seite mit eingebettetem Widget | keine |
 | `GET` | `/widget.js` | Einbettbares Chat-Widget (JavaScript); `Cache-Control: public, max-age=300` | keine |
 
@@ -291,9 +291,11 @@ Einbindungs-Snippet geändert werden muss.
 
 ---
 
-## GET /api/admin/anfragen
+## GET /api/dashboard/anfragen
 
-Daten des Anfragen-Dashboards (`/admin`). Das Log enthält keine IP-Adressen,
+Daten des Anfragen-Dashboards (`/dashboard`). Geschützt mit dem eigenen
+`DASHBOARD_TOKEN` im Header `X-Dashboard-Token` (der `ADMIN_TOKEN` gilt hier nicht;
+ist `DASHBOARD_TOKEN` leer, antworten die Endpunkte immer `403`). Das Log enthält keine IP-Adressen,
 Cookies oder Geräte-Kennungen; E-Mail, Telefonnummern und IBANs sind geschwärzt,
 Einträge werden nach `ANFRAGEN_AUFBEWAHRUNG_TAGE` gelöscht. QS-Anfragen
 (`X-DHI-Test`) werden nicht protokolliert. Details: README, „Anfragen-Dashboard".
@@ -301,7 +303,7 @@ Einträge werden nach `ANFRAGEN_AUFBEWAHRUNG_TAGE` gelöscht. QS-Anfragen
 Query-Parameter: `tage` (1–365, Standard 30), `suche` (Text in Frage/Antwort).
 
 ```bash
-curl "https://bot.example.de/api/admin/anfragen?tage=7" -H "X-Admin-Token: MEIN-TOKEN"
+curl "https://bot.example.de/api/dashboard/anfragen?tage=7" -H "X-Dashboard-Token: MEIN-TOKEN"
 ```
 
 Antwort `200`:
@@ -318,7 +320,7 @@ Antwort `200`:
 `art`: `llm` (Modellantwort), `termine` (deterministische Terminliste), `mock`,
 `fehler` (Antwort gescheitert, Besucher sah 502). Max. 500 neueste Einträge.
 
-`DELETE /api/admin/anfragen/{id}` löscht einen Eintrag (`404`, wenn es ihn nicht gibt).
+`DELETE /api/dashboard/anfragen/{id}` löscht einen Eintrag (`404`, wenn es ihn nicht gibt).
 Falscher/fehlender Token: `403`.
 
 ---
@@ -332,6 +334,7 @@ Falscher/fehlender Token: `403`.
 | `ALLOWED_ORIGINS` | CORS: welche Websites `/api/chat` aus dem Browser aufrufen dürfen (produktiv auf die DHI-Domains einschränken) |
 | `TRUST_PROXY` | `1` hinter Reverse Proxy: echte Besucher-IP aus `X-Forwarded-For` fürs Rate-Limit |
 | `DAILY_MESSAGE_LIMIT` | globale Kostenbremse pro Kalendertag (`0` = aus) |
-| `ADMIN_TOKEN` | Token für `/api/reindex`, `/api/admin/*` und das Dashboard `/admin` |
+| `ADMIN_TOKEN` | Token für `/api/reindex` |
+| `DASHBOARD_TOKEN` | eigener Token für `/api/dashboard/*` und das Dashboard `/dashboard` (leer = gesperrt) |
 | `ANFRAGEN_LOG`, `ANFRAGEN_AUFBEWAHRUNG_TAGE` | anonymes Anfrage-Log an/aus, Löschfrist in Tagen (Standard 90) |
 | `CRAWL_ON_START`, `CRAWL_HOUR` | automatischer Crawl beim Start / täglicher Re-Crawl |

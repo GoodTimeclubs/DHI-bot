@@ -101,9 +101,9 @@ docker compose up
 | `GET /api/health` | Status: Index-Größe, Termine, Modell, Mock-Modus |
 | `GET /api/termine` | Terminstand, aus dem der Bot antwortet (Solldaten für den QS-Lauf) |
 | `POST /api/reindex` | Manueller Re-Crawl (Header `X-Admin-Token: <ADMIN_TOKEN>`) |
-| `GET /admin` | Anfragen-Dashboard (anonym, Login mit `ADMIN_TOKEN`), siehe unten |
-| `GET /api/admin/anfragen` | Daten fürs Dashboard (Header `X-Admin-Token`) |
-| `DELETE /api/admin/anfragen/{id}` | Einzelnen Log-Eintrag löschen (Header `X-Admin-Token`) |
+| `GET /dashboard` | Anfragen-Dashboard (anonym, Login mit `DASHBOARD_TOKEN`), siehe unten |
+| `GET /api/dashboard/anfragen` | Daten fürs Dashboard (Header `X-Dashboard-Token`) |
+| `DELETE /api/dashboard/anfragen/{id}` | Einzelnen Log-Eintrag löschen (Header `X-Dashboard-Token`) |
 
 ➜ **Ausführliche API-Dokumentation mit Beispielen (curl/PowerShell/JS): [API.md](API.md)**
    Interaktive Swagger-Übersicht im Betrieb unter `/docs`.
@@ -133,13 +133,16 @@ Zur Rückfrage-Regel gehört ein Gegenstück im deterministischen Terminpfad:
 eine Hypnose, wann haben Sie in Aschaffenburg einen Termin?") bewusst ans LLM,
 damit dort nachgefragt statt geraten wird.
 
-## Anfragen-Dashboard (`/admin`)
+## Anfragen-Dashboard (`/dashboard`)
 
-Unter `https://BOT-DOMAIN/admin` sieht der Auftraggeber, **was** im Chat gefragt
+Unter `https://BOT-DOMAIN/dashboard` sieht der Auftraggeber, **was** im Chat gefragt
 und geantwortet wird: Kennzahlen, Fragen pro Tag, Themen, auf welcher DHI-Seite
 gefragt wurde, und die einzelnen Fragen mit Antwort (Suche, Gesprächsfilter,
-CSV-Export, Löschen einzelner Einträge). Anmeldung mit dem `ADMIN_TOKEN` aus der
-`.env`; der Token liegt nur im jeweiligen Browser-Tab.
+CSV-Export, Löschen einzelner Einträge). Anmeldung mit dem **eigenen**
+`DASHBOARD_TOKEN` aus der `.env` (nicht dem `ADMIN_TOKEN`: wer mitliest, kann
+damit keinen Re-Crawl auslösen, und der Admin-Token öffnet das Dashboard nicht).
+Ist `DASHBOARD_TOKEN` leer, ist das Dashboard gesperrt. Der Token liegt nur im
+jeweiligen Browser-Tab. Erzeugen z. B. mit `openssl rand -hex 24`.
 
 **Wer** fragt, zeigt das Dashboard bewusst nicht, denn die Auswertung ist anonym:
 
@@ -294,7 +297,7 @@ Ergebnisse und behobene Befunde des QS-Laufs vom 30.07.2026: siehe
   Chats werden nur anonymisiert fürs Dashboard gespeichert (ohne IP, Kontaktdaten
   geschwärzt, Löschung nach 90 Tagen), siehe „Anfragen-Dashboard".
 - **Produktiv-Checkliste**: `DOMAIN` in `.env` setzen (HTTPS übernimmt der mitlaufende Caddy),
-  `ALLOWED_ORIGINS` auf die DHI-Domains setzen, `ADMIN_TOKEN` ändern, AVV mit Anthropic
+  `ALLOWED_ORIGINS` auf die DHI-Domains setzen, `ADMIN_TOKEN` ändern, `DASHBOARD_TOKEN` setzen, AVV mit Anthropic
   abschließen, Datenschutzerklärung der Website ergänzen.
 
 ## Bewusste Grenzen des Prototyps
