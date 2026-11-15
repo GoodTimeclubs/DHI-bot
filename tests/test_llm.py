@@ -3,8 +3,8 @@
 Absichert, dass die QS-kritischen Regeln nicht versehentlich aus dem
 System-Prompt verschwinden (fester WhatsApp-Link, Preis-Trennung
 Ausbildung/Praxis, Link-Pflichten aus dem QS-Lauf 01.08.), dass alle
-Platzhalter befüllt werden und dass der deterministische PREISDATEN-Block
-auch neue Ablefy-Produkte (unbekannte product_keys) sauber aufnimmt.
+Platzhalter befüllt werden und dass der PREISDATEN-Block die Shop-Preise
+(inkl. Vorausgebildeten-Rabatt und Zahlweisen) vollständig übernimmt.
 
 Läuft ohne Server, ohne API-Key und ohne Internet:
     pytest tests/test_llm.py -v
@@ -31,8 +31,6 @@ def test_prompt_enthaelt_kernregeln():
         "[Zu den DHI-Praxen](https://praxen.deutsches-hypnoseinstitut.de/)",
         # strikte Trennung Ausbildungs- vs. Sitzungspreise (v0.3.0)
         "vermische beides nie",
-        # Ausbildungspreis → Buchungsseite Pflicht (QS-Lauf 01.08.: C1/C6)
-        "KEIN Ersatz",
         # Praxis-Preis → Praxis-Link (QS-Lauf 01.08.: G2)
         "[Zur Hypnosepraxis Berlin](https://hypnosepraxis-berlin.deutsches-hypnoseinstitut.de/)",
         # Buchungsfrage → nie nur WhatsApp (QS-Lauf 01.08.: C5)
@@ -44,19 +42,21 @@ def test_prompt_enthaelt_kernregeln():
         "Das Ausbildungsinstitut selbst behandelt nicht",
         # Nachschärfungen aus QS-Runde 2 (01.08., 40/49):
         "absolute Obergrenze 100 Wörter",
-        "verlinke JEDEN genannten Bestandteil",
         "[Zum Hypnotiseurverzeichnis](https://hypnospathie.deutsches-hypnoseinstitut.de/verzeichnis.html)",
         # Nachschärfungen aus QS-Runde 3 (01.08., 46/49):
         "kein Aufsatz",
         "sind NICHT automatisch der Praxis-Kontakt",
         # ── Rückmeldungen aus dem Live-Betrieb (01.08.2026) ──────────────────
-        # 1. Übungstage-Preise sind standortabhängig (Leipzig ≠ Aschaffenburg)
-        "STANDORTABHÄNGIGE PREISE",
-        "Übertrage einen Standortpreis NIEMALS auf einen anderen Standort",
+        # 1. Neues Preismodell (Lars, 05.11.2026): ein Preis für alle drei
+        #    Formate, Rabatte werden bei jeder Preisangabe mitgenannt
+        "kosten je Ausbildungsumfang denselben Preis",
+        "RABATTE: Nennst du einen Ausbildungspreis, nennst du IMMER auch die beiden Vorteile",
+        "11 % Rabatt",
+        "10 % Skonto bei Zahlung innerhalb von 7 Tagen",
         # 2. Terminantworten enden mit dem Button zur Terminseite
         "[Alle Termine im Seminarkalender]({seminarkalender_url})",
-        # 3. Berlin ist kein Ausbildungsstandort (Hamburg/Oberstaufen/Gallicano
-        #    dagegen schon — dort nur ohne feste Termine)
+        # 3. Berlin ist kein Ausbildungsstandort (Gallicano dagegen schon —
+        #    dort nur ohne feste Termine)
         "11. STANDORTE",
         "leite auch aus Kundenstimmen",
         "Übungsstandorte verfügbar, dort aber OHNE feste Termine",
@@ -87,31 +87,37 @@ def test_prompt_verbietet_selbst_konstruierte_kontaktlinks():
 
 # ── build_system: alle Platzhalter befüllt, Kontaktdaten korrekt ─────────────
 
+def _preise(regulaer=359600):
+    from app.crawler import _zahlweisen
+    opts = lambda t: {"regular": {"total_cents": t, "rates": [t], "label": "Regelpreis"},  # noqa: E731
+                      "instant": {"total_cents": round(t * 0.9), "rates": [round(t * 0.9)],
+                                  "label": "Zahlung innerhalb von 7 Tagen · 10 % Skonto"}}
+    return {"regulaer": _zahlweisen(opts(regulaer)),
+            "vorausgebildet": _zahlweisen(opts(round(regulaer * 0.89)))}
+
+
 def _fake_termine():
     return {
         "seminars": [
             {"kind": "presence", "stage": "1+2", "start": "2099-01-05",
              "end": "2099-01-09", "time": "09:30", "location": "Aschaffenburg",
-             "url": "https://dhi2.de/s/d-hi/test"},
+             "orte": ["Aschaffenburg"], "buchbar": True, "preise": _preise(),
+             "url": "https://deutsches-hypnoseinstitut.de/seminare/2/"},
+            {"kind": "online", "stage": "1+2", "start": "2099-02-01",
+             "end": "2099-02-05", "location": "Online", "orte": ["Online"],
+             "buchbar": True, "preise": _preise(),
+             "url": "https://deutsches-hypnoseinstitut.de/seminare/76/"},
+            {"kind": "hybrid", "stage": "1+2+3", "start": "2099-03-01",
+             "end": "2099-03-12", "location": "Hamburg / Leipzig", "orte": ["Hamburg", "Leipzig"],
+             "buchbar": False, "preise": _preise(650000),
+             "url": "https://deutsches-hypnoseinstitut.de/seminare/51/"},
         ],
-        "notes": [],
         "fetched_at": "2099-01-01T00:00:00+00:00",
-    }
-
-
-def _fake_buchungsseite(product_key="presence12", title="DHI 1.0 Buchung"):
-    return {
-        "source": "buchungsseite",
-        "product_key": product_key,
-        "title": title,
-        "url": f"https://dhi2.de/s/d-hi/{product_key}",
-        "text": "Gesamtpreis 3.596,00 € inkl. MwSt.\nSkonto bei Einmalzahlung\nDer Betrag wird in 4 Monatsraten beglichen",
     }
 
 
 def test_build_system_fuellt_alle_platzhalter(monkeypatch):
     monkeypatch.setattr(llm.retrieval, "get_termine", _fake_termine)
-    monkeypatch.setattr(llm.retrieval, "get_pages", lambda: [_fake_buchungsseite()])
     out = llm.build_system([
         {"title": "Praxis Berlin", "url": "https://hypnosepraxis-berlin.deutsches-hypnoseinstitut.de/",
          "text": "Hypnose-Sitzung 180 €"},
@@ -125,22 +131,30 @@ def test_build_system_fuellt_alle_platzhalter(monkeypatch):
     assert "https://wa.me/4915154434470" in out         # einzig erlaubter WhatsApp-Link
     assert "05.01." in out                              # Termin formatiert
     assert "Hypnose-Sitzung 180 €" in out               # Kontext-Auszug
-    assert "3.596" in out                               # PREISDATEN-Block
-    assert "seminarkalender.html" in out                # Terminseite verlinkbar
-    assert "Aschaffenburg, Leipzig, Stuttgart" in out   # Orte mit festen Terminen
-    assert "Hamburg, Oberstaufen-Steibis, Gallicano" in out  # Übungsorte auf Anfrage
+    assert "Regelpreis 3.596,00 €" in out               # PREISDATEN-Block
+    assert "deutsches-hypnoseinstitut.de/seminare/" in out  # Terminseite verlinkbar
+    assert "Aschaffenburg, Hamburg, Leipzig" in out     # Orte mit festen Terminen aus dem Shop
+    assert "Gallicano" in out                           # Übungsort auf Anfrage
     assert "Berlin ist weder Ausbildungs- noch Übungsstandort" in out
     assert "Katrin Winkelmann" in out                   # Klarstellungs-Block
 
 
-def test_hamburg_und_co_werden_nicht_als_nicht_standort_gefuehrt():
-    """Regressionsschutz: Hamburg, Oberstaufen-Steibis und Gallicano sind laut
-    Website verfügbare Übungsstandorte (nur ohne feste Termine). Sie dürfen
-    nie in der Verneinungsliste landen — sonst sagt der Bot echten
-    Interessenten ab (bestehender Testkatalog-Fall B8)."""
+def test_hamburg_und_co_werden_nicht_als_nicht_standort_gefuehrt(monkeypatch):
+    """Regressionsschutz: Hamburg, Oberstaufen/Steibis und Gallicano sind
+    Standorte. Sie dürfen nie in der Verneinungsliste landen — sonst sagt der
+    Bot echten Interessenten ab (bestehender Testkatalog-Fall B8). Orte mit
+    Shop-Terminen stehen in der Standortliste, nicht doppelt als „auf Anfrage"."""
     from app.config import KEINE_AUSBILDUNGSSTANDORTE, UEBUNGSSTANDORTE_AUF_ANFRAGE
     assert set(KEINE_AUSBILDUNGSSTANDORTE) == {"Berlin"}
-    assert "Hamburg" in UEBUNGSSTANDORTE_AUF_ANFRAGE
+    assert "Gallicano (Toskana)" in UEBUNGSSTANDORTE_AUF_ANFRAGE
+    monkeypatch.setattr(llm.retrieval, "get_termine", _fake_termine)
+    assert llm.standorte() == ["Aschaffenburg", "Hamburg", "Leipzig"]  # ohne „Online"
+
+
+def test_standorte_ohne_shopdaten_aus_config(monkeypatch):
+    from app.config import AUSBILDUNGSSTANDORTE
+    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {})
+    assert llm.standorte() == AUSBILDUNGSSTANDORTE
 
 
 def test_klarstellung_winkelmann_wird_woertlich_uebernommen():
@@ -153,127 +167,41 @@ def test_klarstellung_winkelmann_wird_woertlich_uebernommen():
     assert "DHI-Zertifikate auszustellen" in text
 
 
-# ── PREISDATEN-Block: neue Produkte, wörtliche Zeilen ────────────────────────
+# ── PREISDATEN-Block aus den Shop-Daten (ab Nov. 2026) ───────────────────────
 
-def test_format_preise_faellt_bei_unbekanntem_produkt_auf_den_seitentitel(monkeypatch):
-    """Neue Ablefy-Produkte (z.B. expertReinkarnation, seit 01.08. im Kalender)
-    haben keinen Eintrag in PRODUCT_LABEL — der Block muss trotzdem Label,
-    Buchungslink und wörtliche Preiszeilen enthalten."""
-    seite = {
-        "source": "buchungsseite",
-        "product_key": "expertReinkarnation",
-        "title": "DHI Experteseminar Reinkarnation – Buchung",
-        "url": "https://dhi2.de/s/d-hi/reinkarnation-test",
-        "text": "DHI Experteseminar Reinkarnation\n499,00 € inkl. MwSt.\nDer Betrag wird in 4 Monatsraten beglichen",
-    }
-    monkeypatch.setattr(llm.retrieval, "get_pages", lambda: [seite])
+def test_preisblock_fasst_formate_mit_gleichem_preis_zusammen(monkeypatch):
+    """Lars, 05.11.2026: alle drei Varianten kosten denselben Betrag — der
+    Block nennt ihn einmal und listet alle Formate dazu."""
+    monkeypatch.setattr(llm.retrieval, "get_termine", _fake_termine)
     out = llm.format_preise()
-    assert "Reinkarnation" in out                       # Fallback auf Seitentitel
-    assert "https://dhi2.de/s/d-hi/reinkarnation-test" in out
-    assert "499,00 €" in out                            # wörtliche Preiszeile
-    assert "Monatsraten" in out                         # wörtliche Ratenzeile
+    assert out.count("Regelpreis 3.596,00 €") == 1
+    assert "- Stufe 1+2 (DHI 1.0 Vollpräsenz, DHI 3.0 Online live):" in out
+    assert "Regelpreis 6.500,00 €" in out              # Komplettausbildung eigene Zeile
+    assert out.index("Stufe 1+2 (") < out.index("Stufe 1+2+3 (")
 
 
-# ── Standortabhängige Preise der Übungstage (Live-Befund 01.08.2026) ─────────
-
-def _uebungstage_seite():
-    """Buchungsseite der Übungstage: nennt nur den Basispreis (Aschaffenburg)."""
-    return {
-        "source": "buchungsseite",
-        "product_key": "practice12",
-        "title": "DHI2.0 Übungstage der Stufen 1+2 in Präsenz",
-        "url": "https://dhi2.de/s/d-hi/uebungstage-12",
-        "text": "DHI2.0 Übungstage der Stufen 1+2 in Präsenz\n1.196,00€\n"
-                "Der Betrag wird in 4 Monatsraten beglichen",
-    }
+def test_preisblock_nennt_rabatte_mit_fertigen_betraegen(monkeypatch):
+    """Lars, 05.11.2026: 11 % Vorausgebildeten-Rabatt und 10 % über die
+    Zahlweise gehören zu jeder Preisangabe — mit Beträgen aus dem Shop, damit
+    das Modell nie selbst rechnet."""
+    monkeypatch.setattr(llm.retrieval, "get_termine", _fake_termine)
+    out = llm.format_preise()
+    assert "Zahlung innerhalb von 7 Tagen, 10 % Skonto: 3.236,40 €" in out
+    assert "Mit Vorausbildung beim DHI (11 % Rabatt): Regelpreis 3.200,44 €" in out
+    assert "Zahlung innerhalb von 7 Tagen, 10 % Skonto: 2.880,40 €" in out  # beides kombiniert
 
 
-def test_standortpreise_aus_dem_crawl_haben_vorrang(monkeypatch):
-    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {
-        "preisvarianten": {"practice12": {"Leipzig": "1.499,00 €"}},
-    })
-    assert llm.standortpreise("practice12") == {"Leipzig": "1.499,00 €"}
-
-
-def test_standortpreise_fallen_auf_die_gepflegte_tabelle_zurueck(monkeypatch):
-    """Scheitert der Checkout-Abruf, muss der Bot trotzdem korrekte
-    Standortpreise kennen (config.UEBUNGSTAGE_PREISE_FALLBACK)."""
+def test_preisblock_ohne_shopdaten(monkeypatch):
     monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {})
-    preise = llm.standortpreise("practice12")
-    assert preise["Aschaffenburg"] == "1.196,00 €"
-    assert preise["Leipzig"] == "1.496,00 €"
-    assert preise["Stuttgart"] == "1.496,00 €"
+    assert llm.format_preise() == "(keine Preisdaten geladen)"
 
 
-def test_preisblock_nennt_standortpreise_statt_basispreis(monkeypatch):
-    """Kernfix: Der Basispreis der Produktseite (1.196,00 €) gilt nur für
-    Aschaffenburg. Er darf im PREISDATEN-Block nicht mehr ohne Ortsangabe
-    auftauchen, sonst nennt das Modell ihn für Leipzig oder Stuttgart."""
-    monkeypatch.setattr(llm.retrieval, "get_pages", lambda: [_uebungstage_seite()])
-    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {
-        "preisvarianten": {"practice12": {
-            "Aschaffenburg": "1.196,00 €", "Leipzig": "1.496,00 €", "Stuttgart": "1.496,00 €",
-        }},
-    })
-    out = llm.format_preise()
-    assert "STANDORTPREISE" in out
-    for zeile in ("Aschaffenburg: 1.196,00 €", "Leipzig: 1.496,00 €", "Stuttgart: 1.496,00 €"):
-        assert zeile in out, f"fehlt: {zeile}"
-    # der unbeschriftete Basispreis ist raus, die Ratenangabe bleibt
-    assert "„1.196,00€“" not in out
-    assert "Monatsraten" in out
-    assert "https://dhi2.de/s/d-hi/uebungstage-12" in out
-
-
-def test_standortpreise_folgen_dem_seminarkalender(monkeypatch):
-    """Die feste Tabelle darf keine Orte behaupten, an denen das Produkt laut
-    Kalender gar nicht mehr stattfindet."""
-    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {
-        "seminars": [
-            {"product_key": "practice12", "location": "Aschaffenburg"},
-            {"product_key": "practice12", "location": "Leipzig"},
-            {"product_key": "hybrid12", "location": "Live-Online"},
-        ],
-    })
-    assert set(llm.standortpreise("practice12")) == {"Aschaffenburg", "Leipzig"}
-
-
-def test_kontext_warnt_vor_dem_basispreis_der_buchungsseite(monkeypatch):
-    """Der Auszug der Buchungsseite enthält den nackten Basispreis ohne Ort.
-    Ohne Warnung stünde er gleichberechtigt neben den STANDORTPREISEN — genau
-    das führte zur falschen Leipzig-Auskunft."""
-    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {
-        "preisvarianten": {"practice12": {"Leipzig": "1.496,00 €"}},
-    })
-    monkeypatch.setattr(llm.retrieval, "get_pages", lambda: [_uebungstage_seite()])
-    out = llm.build_system([
-        {"title": "Übungstage", "url": "https://dhi2.de/s/d-hi/uebungstage-12",
-         "source": "buchungsseite", "product_key": "practice12",
-         "text": "DHI2.0 Übungstage der Stufen 1+2\n1.196,00€"},
-        {"title": "FAQ", "url": "https://deutsches-hypnoseinstitut.de/faq-ausbildung.html",
-         "source": "website", "text": "Ablauf der Ausbildung"},
-    ])
-    assert "Beträge in diesem Auszug sind Basispreise OHNE Ortsangabe" in out
-    # nur einmal: Website-Auszüge ohne Preisbezug bleiben unkommentiert
-    assert out.count("[ACHTUNG:") == 1
-
-
-def test_preisblock_laesst_produkte_ohne_standortpreise_unveraendert(monkeypatch):
-    """Vollpräsenz findet nur in Aschaffenburg statt — dort bleibt der
-    wörtliche Preis der Buchungsseite die Quelle."""
-    monkeypatch.setattr(llm.retrieval, "get_pages", lambda: [_fake_buchungsseite()])
-    monkeypatch.setattr(llm.retrieval, "get_termine", lambda: {})
-    out = llm.format_preise()
-    assert "STANDORTPREISE" not in out
-    assert "3.596,00 €" in out
-
-
-def test_format_preise_ignoriert_websiteseiten(monkeypatch):
-    monkeypatch.setattr(llm.retrieval, "get_pages", lambda: [
-        {"source": "website", "title": "Praxis", "url": "https://x/", "text": "Sitzung 180 €"},
-    ])
-    out = llm.format_preise()
-    assert "180" not in out  # Praxis-Preise gehören NICHT in die Ausbildungs-PREISDATEN
+def test_termin_auf_anfrage_wird_gekennzeichnet(monkeypatch):
+    monkeypatch.setattr(llm.retrieval, "get_termine", _fake_termine)
+    text, _ = llm.format_termine()
+    zeile = next(z for z in text.splitlines() if "Hamburg" in z)
+    assert "nur auf Anfrage: https://deutsches-hypnoseinstitut.de/seminare/51/" in zeile
+    assert "Buchung: https://deutsches-hypnoseinstitut.de/seminare/2/" in text
 
 
 # ── Termin-Baustein: nummeriert und chronologisch ────────────────────────────
@@ -282,9 +210,9 @@ def test_format_termine_nummeriert_chronologisch(monkeypatch):
     daten = _fake_termine()
     daten["seminars"] = [
         {"kind": "hybrid", "stage": "3", "start": "2099-06-01", "end": "2099-06-04",
-         "location": "Live-Online", "url": "https://dhi2.de/s/b"},
+         "location": "Live-Online", "url": "https://deutsches-hypnoseinstitut.de/seminare/b/"},
         {"kind": "presence", "stage": "1+2", "start": "2099-01-05", "end": "2099-01-09",
-         "location": "Aschaffenburg", "url": "https://dhi2.de/s/a"},
+         "location": "Aschaffenburg", "url": "https://deutsches-hypnoseinstitut.de/seminare/a/"},
     ]
     monkeypatch.setattr(llm.retrieval, "get_termine", lambda: daten)
     text, stand = llm.format_termine()
@@ -350,9 +278,10 @@ def test_deterministische_terminantworten_sind_gedankenstrichfrei(monkeypatch):
     monkeypatch.setattr(
         termine.retrieval, "get_termine",
         lambda: {"seminars": [
-            {"kind": "practice", "stage": "1+2", "start": "2099-05-02",
-             "end": "2099-05-03", "location": "Stuttgart",
-             "url": "https://dhi2.de/s/d-hi/test", "id": "t1", "title": "Übungstage"},
+            {"kind": "hybrid", "stage": "1+2", "start": "2099-05-02",
+             "end": "2099-05-03", "location": "Stuttgart", "orte": ["Stuttgart"],
+             "url": "https://deutsches-hypnoseinstitut.de/seminare/1/", "id": "t1",
+             "title": "DHI 2.0"},
         ], "notes": [], "fetched_at": "2099-01-01T00:00:00+00:00"},
     )
     out = llm.answer("Welche Übungstage gibt es in Stuttgart?", [])

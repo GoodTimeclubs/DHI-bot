@@ -33,7 +33,7 @@ def _erwartete(kind=None, stage=None, location=None):
         if s["start"] >= TODAY
         and (kind is None or s["kind"] == kind)
         and (stage is None or s["stage"] == stage)
-        and (location is None or s["location"] == location)
+        and (location is None or location in s.get("orte", [s["location"]]))
     ]
     return sorted(res, key=lambda s: s["start"])
 
@@ -45,33 +45,37 @@ def _datum_de(iso: str) -> str:
 
 # ── Kernfall des Befunds: frühester Termin darf nie fehlen ───────────────────
 
-def test_uebungstage_stuttgart_beginnen_beim_fruehesten():
-    r = try_answer("Welche Übungstage gibt es in Stuttgart?", today=TODAY)
+def test_uebungstage_leipzig_beginnen_beim_fruehesten():
+    r = try_answer("Welche Übungstage gibt es in Leipzig?", today=TODAY)
     assert r is not None and r.get("deterministic")
-    erwartet = _erwartete(kind="practice", location="Stuttgart")
-    assert erwartet[0]["start"] == "2027-01-30"  # Datenstand-Kontrolle
+    erwartet = _erwartete(kind="hybrid", location="Leipzig")
+    assert erwartet[0]["start"] == "2027-06-07"  # Datenstand-Kontrolle
     assert _datum_de(erwartet[0]["start"]) in r["reply"]
     # chronologisch: der früheste steht vor allen weiteren genannten Daten
     pos = [r["reply"].find(_datum_de(s["start"])) for s in erwartet[:3]]
     pos = [p for p in pos if p >= 0]
     assert pos and pos[0] == min(pos)
-    assert "Stuttgart" in r["reply"]
-    assert any("dhi2.de" in u for _, u in MD_LINK.findall(r["reply"]))
+    assert "Leipzig" in r["reply"]
+    assert any("/seminare/" in u for _, u in MD_LINK.findall(r["reply"]))
 
 
 def test_alle_filterkombinationen_enthalten_den_fruehesten():
     """Property-Test über alle sinnvollen Filter-Fragen: WENN deterministisch
     geantwortet wird, steht der früheste passende Termin in der Antwort."""
-    orte = sorted({s["location"] for s in TERMINE["seminars"] if s["location"] != "Live-Online"})
+    orte = sorted({o for s in TERMINE["seminars"] for o in s["orte"] if o != "Online"})
+    uebungsorte = {o for s in TERMINE["seminars"] if s["kind"] == "hybrid" for o in s["orte"]}
     fragen = []
     for ort in orte:
-        fragen.append((f"Welche Übungstage gibt es in {ort}?", dict(kind="practice", location=ort)))
         fragen.append((f"Wann sind die nächsten Termine in {ort}?", dict(location=ort)))
-    for stage in ("1+2", "3"):
+        if ort in uebungsorte:
+            fragen.append((f"Welche Übungstage gibt es in {ort}?", dict(kind="hybrid", location=ort)))
+    for stage in ("1+2", "3", "1+2+3", "4"):
         fragen.append((f"Wann ist der nächste Termin für Stufe {stage}?", dict(stage=stage)))
-        fragen.append((f"Welche Übungstage gibt es für Stufe {stage}?", dict(kind="practice", stage=stage)))
+    for stage in ("1+2", "3"):
+        fragen.append((f"Welche Übungstage gibt es für Stufe {stage}?", dict(kind="hybrid", stage=stage)))
     fragen.append(("Wann startet die nächste Vollpräsenz-Ausbildung?", dict(kind="presence")))
-    fragen.append(("Wann sind die nächsten Live-Online-Termine?", dict(kind="hybrid")))
+    fragen.append(("Wann sind die nächsten Live-Hybrid-Termine?", dict(kind="hybrid")))
+    fragen.append(("Wann sind die nächsten Live-Online-Termine?", dict(kind="online")))
 
     for frage, filt in fragen:
         erwartet = _erwartete(**filt)
@@ -82,27 +86,33 @@ def test_alle_filterkombinationen_enthalten_den_fruehesten():
         )
 
 
-def test_stufe3_kurs_meint_kursstart_nicht_uebungstage():
+def test_stufe3_kurs_listet_den_fruehesten_start_aller_formate():
     r = try_answer("Wann startet der nächste Stufe-3-Kurs?", today=TODAY)
     assert r is not None
-    assert "26.10." in r["reply"]          # frühester Stufe-3-Kursstart (Vollpräsenz)
-    assert "22.02." in r["reply"]          # danach der Hybrid-Start
-    assert "27.02." not in r["reply"]      # Übungstage sind kein Kursstart
+    assert "18.01." in r["reply"]          # frühester Stufe-3-Start (Vollpräsenz Aschaffenburg)
 
 
-def test_leipzig_ausbildung_wird_als_uebungstage_eingeordnet():
+def test_leipzig_nennt_auch_termine_auf_anfrage():
+    """Nicht direkt buchbare Shop-Termine („Details und Anfrage") bleiben
+    sichtbar, verlinken aber auf die Anfrage statt auf „Jetzt buchen"."""
     r = try_answer("Wann findet die nächste Ausbildung in Leipzig statt?", today=TODAY)
     assert r is not None
     assert "Leipzig" in r["reply"]
-    assert "02.03." in r["reply"]          # frühester Leipzig-Termin
-    assert re.search(r"live.online", r["reply"], re.I)  # Einordnung: Theorie online
+    assert "06.04." in r["reply"]          # frühester Leipzig-Termin (Vollpräsenz, auf Anfrage)
+    assert "[Details und Anfrage](" in r["reply"]
+
+
+def test_hybrid_mit_ortsfrage_ordnet_die_uebungstage_ein():
+    r = try_answer("Welche Übungstage gibt es in Aschaffenburg?", today=TODAY)
+    assert r is not None
+    assert re.search(r"live online", r["reply"], re.I)  # Einordnung: Theorie online
 
 
 # ── Gating: diese Fragen gehören weiterhin zum LLM ───────────────────────────
 
 def test_unbekannter_ort_geht_ans_llm():
     assert try_answer("Gibt es auch Termine in Frankfurt?", today=TODAY) is None
-    assert try_answer("Wann startet der nächste Kurs in München?", today=TODAY) is None
+    assert try_answer("Wann startet der nächste Kurs in Köln?", today=TODAY) is None
 
 
 def test_preis_und_buchungsfragen_gehen_ans_llm():
@@ -134,8 +144,8 @@ def test_uhrzeit_und_detailfragen_gehen_ans_llm():
 
 
 def test_leeres_filterergebnis_geht_ans_llm():
-    # Vollpräsenz gibt es nur in Aschaffenburg → LLM soll die Alternative anbieten
-    assert try_answer("Wann ist die nächste Vollpräsenz in Stuttgart?", today=TODAY) is None
+    # Live-Hybrid-Übungstage gibt es nur in Aschaffenburg und Leipzig → LLM bietet Alternativen an
+    assert try_answer("Wann ist die nächste Live-Hybrid-Ausbildung in Stuttgart?", today=TODAY) is None
 
 
 def test_allgemeine_und_unklare_fragen_gehen_ans_llm():
@@ -148,7 +158,7 @@ def test_allgemeine_und_unklare_fragen_gehen_ans_llm():
 
 def test_antwortformat_haelt_die_widget_regeln_ein():
     fragen = [
-        "Welche Übungstage gibt es in Stuttgart?",
+        "Welche Übungstage gibt es in Leipzig?",
         "Wann ist der nächste Termin für Stufe 1+2?",
         "Wann startet der nächste Stufe-3-Kurs?",
         "Wann findet die nächste Ausbildung in Leipzig statt?",
@@ -169,8 +179,8 @@ def test_antwortformat_haelt_die_widget_regeln_ein():
 
 
 def test_datumsbereich_format():
-    r = try_answer("Welche Übungstage gibt es in Stuttgart?", today=TODAY)
-    assert "30.01.–31.01.2027" in r["reply"]
+    r = try_answer("Welche Übungstage gibt es in Leipzig?", today=TODAY)
+    assert "07.06.–11.06.2027" in r["reply"]
 
 
 # ── Button zur Terminseite (Rückmeldung aus dem Live-Betrieb, 01.08.2026) ────
@@ -180,7 +190,7 @@ def test_jede_terminantwort_endet_mit_dem_seminarkalender_button():
     Terminseite." Das Widget rendert [Beschriftung](URL) als Button — steht der
     Link in der letzten Zeile, endet die Antwort sichtbar mit diesem Button."""
     fragen = [
-        "Welche Übungstage gibt es in Stuttgart?",
+        "Welche Übungstage gibt es in Leipzig?",
         "Wann ist der nächste Termin für Stufe 1+2?",
         "Wann startet der nächste Stufe-3-Kurs?",
         "Wann findet die nächste Ausbildung in Leipzig statt?",
@@ -191,7 +201,7 @@ def test_jede_terminantwort_endet_mit_dem_seminarkalender_button():
         assert r is not None, frage
         zeilen = [z for z in r["reply"].splitlines() if z.strip()]
         assert zeilen[-1] == KALENDER_BUTTON, f"kein Abschluss-Button bei: {frage!r}"
-        assert r["reply"].count(SEMINARKALENDER_URL) == 1, f"Link doppelt bei: {frage!r}"
+        assert r["reply"].count(f"]({SEMINARKALENDER_URL})") == 1, f"Link doppelt bei: {frage!r}"
 
 
 def test_button_auch_wenn_alle_termine_gezeigt_wurden(monkeypatch):
@@ -199,8 +209,9 @@ def test_button_auch_wenn_alle_termine_gezeigt_wurden(monkeypatch):
     import app.termine as termine
     monkeypatch.setattr(termine.retrieval, "get_termine", lambda: {
         "seminars": [{
-            "id": "t1", "kind": "practice", "stage": "1+2", "start": "2099-05-02",
-            "end": "2099-05-03", "location": "Stuttgart", "url": "https://dhi2.de/s/d-hi/t",
+            "id": "t1", "kind": "hybrid", "stage": "1+2", "start": "2099-05-02",
+            "end": "2099-05-03", "location": "Stuttgart", "orte": ["Stuttgart"],
+            "url": "https://deutsches-hypnoseinstitut.de/seminare/1/",
         }],
         "notes": [], "fetched_at": "2099-01-01T00:00:00+00:00",
     })

@@ -18,8 +18,10 @@
 #               in der Antwort stehen. soft: true ⇒ nur Warnung statt Fehler.
 #   if_mentions: {trigger: regex, then_must_any: [regex, …]}  Bedingter Check.
 #
-# Preis-Assertions (3.596 € usw.) müssen bei einer Preisänderung auf den
-# Ablefy-Buchungsseiten angepasst werden — Stand: 29.07.2026.
+# Preis-Assertions (3.596 € usw.) müssen bei einer Preisänderung im Shop
+# (deutsches-hypnoseinstitut.de/seminare/) angepasst werden — Stand: 15.11.2026.
+# Seit Nov. 2026: ein Preis für DHI 1.0/2.0/3.0 je Stufe, Übungstage der DHI 2.0
+# inklusive, 11 % Vorausgebildeten-Rabatt, 10 % Skonto bei Zahlung in 7 Tagen.
 
 global_checks:
   sie_form: true          # niemals du/dich/dir/dein/euch/euer in der Antwort
@@ -38,7 +40,7 @@ faelle:
     frage: "Was ist der Unterschied zwischen DHI 1.0 und DHI 2.0?"
     soll: >
       Erklärt kurz: DHI 1.0 = Vollpräsenz vor Ort, DHI 2.0 = Live-Hybrid
-      (Theorie live online + Übungstage in Präsenz). Kein Roman, gern mit
+      (Theorie live online + Übungstage in Präsenz); gleicher Preis. Kein Roman, gern mit
       weiterführender Frage.
     checks:
       must_any: ["vollpräsenz", "präsenz"]
@@ -112,19 +114,18 @@ faelle:
       ein konkreter nächster Termin muss fallen.
     checks:
       next_termin: { stage: "1+2", top: 3 }
-      link_any: ["dhi2.de"]
+      link_any: ["/seminare/"]
 
   - id: B2-termine-leipzig
     kategorie: termine
     frage: "Wann findet die nächste Ausbildung in Leipzig statt?"
     soll: >
-      Ehrlich einordnen: In Leipzig finden Übungstage statt (die Theorie ist
-      bei DHI 2.0 live online). Nennt den nächsten Leipzig-Termin aus dem
-      Kalender; erfindet keine Vollpräsenz-Ausbildung in Leipzig.
+      Nennt den nächsten Leipzig-Termin aus dem Shop (Vollpräsenz DHI 1.0
+      oder DHI 2.0 mit Übungstagen in Leipzig). Termine „auf Anfrage“ als
+      solche kennzeichnen.
     checks:
       must_all: ["leipzig"]
       next_termin: { location: "Leipzig", top: 3, soft: true }
-
   - id: B3-standort-frankfurt
     kategorie: termine
     frage: "Gibt es auch Termine in Frankfurt?"
@@ -136,38 +137,35 @@ faelle:
       must_any: ["aschaffenburg"]
       must_not: ["termin in frankfurt am", "in frankfurt (startet|beginnt|findet)"]
 
-  - id: B4-uebungstage-stuttgart
+  - id: B4-termine-stuttgart
     kategorie: termine
-    frage: "Welche Übungstage gibt es in Stuttgart?"
+    frage: "Welche Termine gibt es in Stuttgart?"
     soll: >
-      Nennt die nächsten Übungstage in Stuttgart mit Datum und Stufe, plus
-      Buchungslink. Seit v0.2.3 deterministisch aus termine.json (QS-Befund 8),
-      daher top: 1 — der FRÜHESTE Termin muss genannt sein. (Mit
+      Nennt die nächsten Stuttgart-Termine mit Datum und Stufe, plus Link.
+      Seit v0.2.3 deterministisch aus termine.json (QS-Befund 8), daher
+      top: 1 — der FRÜHESTE Termin muss genannt sein. (Mit
       DETERMINISTIC_TERMINE=0 kann dieser Check wieder flaky werden.)
     checks:
       must_all: ["stuttgart"]
-      next_termin: { kind: "practice", location: "Stuttgart", top: 1 }
-      link_any: ["dhi2.de"]
-
+      next_termin: { location: "Stuttgart", top: 1 }
+      link_any: ["/seminare/"]
   - id: B5-theorie-online
     kategorie: termine
     frage: "Kann ich die Theorie auch komplett online machen?"
     soll: >
-      Ja — DHI 2.0 Live-Hybrid: Theorie live online, Praxis an Übungstagen
-      vor Ort. Übungstage nicht verschweigen.
+      Ja — DHI 3.0 läuft komplett live online; alternativ DHI 2.0 Live-Hybrid
+      (Theorie online, Übungstage in Präsenz).
     checks:
-      must_any: ["dhi 2", "hybrid", "live.?online"]
-      must_any_2: ["übungstage", "präsenz"]
-
+      must_any: ["dhi 3", "komplett (live )?online", "online live", "live.?online"]
   - id: B6-naechste-stufe3
     kategorie: termine
     frage: "Wann startet der nächste Stufe-3-Kurs?"
     soll: >
-      Nennt den nächsten Stufe-3-Kurstermin (Vollpräsenz oder Hybrid, keine
-      reinen Übungstage) mit Buchungslink.
+      Nennt den nächsten Stufe-3-Kurstermin (Vollpräsenz, Hybrid oder
+      Online) mit Buchungslink.
     checks:
-      next_termin: { stage: "3", kind: "presence|hybrid", top: 3 }
-      link_any: ["dhi2.de"]
+      next_termin: { stage: "3", kind: "presence|hybrid|online", top: 3 }
+      link_any: ["/seminare/"]
 
   - id: B7-uebungstage-leipzig-frueheste
     kategorie: termine
@@ -175,41 +173,40 @@ faelle:
     soll: >
       Deterministische Terminantwort (v0.2.3, QS-Befund 8): Liste kommt per
       strukturiertem Filter aus termine.json, beginnt garantiert beim
-      frühesten Leipzig-Übungstag (top: 1) und enthält einen Buchungslink.
+      frühesten DHI-2.0-Termin mit Übungstagen in Leipzig (top: 1) und enthält einen Buchungslink.
       (Mit DETERMINISTIC_TERMINE=0 kann dieser Check wieder flaky werden.)
     checks:
       must_all: ["leipzig"]
-      next_termin: { kind: "practice", location: "Leipzig", top: 1 }
-      link_any: ["dhi2.de"]
+      next_termin: { kind: "hybrid", location: "Leipzig", top: 1 }
+      link_any: ["/seminare/"]
 
   - id: B8-uebungstage-hamburg
     kategorie: termine
     frage: "Gibt es auch Übungstage in Hamburg?"
     soll: >
-      Hamburg ist laut Website Übungsstandort, hat aber keine festen Termine
-      im Kalender (Kalender-Hinweis: „Termine nach Vereinbarung"). Ehrlich
-      einordnen, Kontakt/Beratung oder Alternative anbieten — keine
-      erfundenen Hamburg-Termine.
+      DHI-2.0-Übungstage gibt es laut Shop in Aschaffenburg und Leipzig; in
+      Hamburg steht ein Vollpräsenz-Termin (auf Anfrage). Ehrlich einordnen,
+      Alternative oder Beratung anbieten — keine erfundenen Hamburg-Übungstage.
     checks:
       must_all: ["hamburg"]
-      must_any: ["vereinbarung", "vereinbar", "anmeldung", "abgestimmt", "abstimm", "anfrage", "kontakt", "beratung", "whatsapp", "telefon", "alternativ"]
-      must_not: ["hamburg (startet|beginnt|findet) am \\d", "übungstage in hamburg am \\d"]
-
+      must_any: ["aschaffenburg", "leipzig", "vollpräsenz", "anfrage", "beratung", "kontakt", "whatsapp", "telefon", "alternativ"]
+      must_not: ["übungstage in hamburg (am|vom) \\d"]
   # ── C · Preise & Buchung ───────────────────────────────────────────────────
 
   - id: C1-preis-stufe12
     kategorie: preise
     frage: "Was kostet die Hypnoseausbildung Stufe 1+2?"
     soll: >
-      Nennt den Gesamtpreis der Vollpräsenz Stufe 1+2 (3.596 €) mit klarem
-      Bezug, idealerweise mit Hinweis auf DHI 2.0 als getrennt bepreiste
-      Alternative, plus Buchungslink. Niemals eine Monatsrate als
-      Gesamtpreis.
+      Nennt 3.596 € (gleich für DHI 1.0, 2.0 und 3.0) mit klarem Bezug und
+      Link, dazu die beiden Vorteile laut Shop: 11 % Rabatt für
+      DHI-Vorausgebildete und 10 % Skonto bei Zahlung in 7 Tagen (3.236,40 €).
+      Niemals eine Monatsrate als Gesamtpreis.
     checks:
       must_any: ["3\\.596", "3596"]
-      link_any: ["dhi2.de"]
-      if_mentions: { trigger: "239,60", then_must_any: ["rate", "monatsrate"] }
-
+      must_any_2: ["11 ?%", "vorausbild", "3\\.200"]
+      must_any_3: ["skonto", "10 ?%", "3\\.236"]
+      link_any: ["/seminare/"]
+      if_mentions: { trigger: "359,60", then_must_any: ["rate", "monatsrate"] }
   - id: C2-ratenzahlung
     kategorie: preise
     frage: "Kann ich in Raten zahlen?"
@@ -229,50 +226,41 @@ faelle:
       statt 3.596 €) oder auf die Buchungsseite verweisen. Keine erfundenen
       Rabattcodes.
     checks:
-      must_any: ["skonto", "3\\.236", "buchungsseite", "dhi2.de"]
+      must_any: ["skonto", "3\\.236", "buchungsseite", "seminare"]
 
   - id: C4-preis-dhi20
     kategorie: preise
     frage: "Was kostet die DHI 2.0 Ausbildung?"
     soll: >
-      Erklärt die getrennten Buchungsbestandteile (Live-Online-Theorie und
-      Übungstage werden separat gebucht/bepreist — Regel 6). Beträge nur
-      wörtlich mit der Beschriftung der Buchungsseite (z.B. „wird laut
-      Buchungsseite in 4 Monatsraten beglichen") — keine selbst errechneten
-      Summen oder Ratenbeträge. Im Zweifel Buchungsseite verlinken.
+      Stufe 1+2 kostet 3.596 € wie DHI 1.0 und 3.0; die Präsenz-Übungstage
+      gehören zum Angebot (kein separater Preis mehr). Beträge nur wörtlich
+      aus den PREISDATEN, keine selbst errechneten Summen; Link.
     checks:
-      must_any: ["übungstage"]
-      if_mentions: { trigger: "239,60", then_must_any: ["rate", "monatsrate", "beglichen", "theorie"] }
-      must_not: ["à etwa", "1\\.43[56]", "(zusammen|insgesamt|gesamt\\w*)[^.]{0,40}(knapp|rund|etwa|ca\\.?)\\s*\\**\\d"]
-      link_any: ["dhi2.de"]
-
+      must_any: ["3\\.596"]
+      must_not: ["à etwa", "2\\.396", "1\\.196", "1\\.496", "(zusammen|insgesamt|gesamt\\w*)[^.]{0,40}(knapp|rund|etwa|ca\\.?)\\s*\\**\\d"]
+      link_any: ["/seminare/"]
   - id: C5-wie-buchen
     kategorie: buchung
     frage: "Wie kann ich einen Kurs verbindlich buchen?"
     soll: >
-      Erklärt die Online-Buchung über die Terminseiten (Ablefy/dhi2.de) und
-      verlinkt passend (Buchungsseite oder Seminarkalender). Alternativ
+      Erklärt die Online-Buchung über die Termin- und Buchungsseite der
+      Website (/seminare/) und verlinkt sie. Alternativ
       persönliche Beratung anbieten.
     checks:
-      link_any: ["dhi2.de", "seminarkalender"]
+      link_any: ["/seminare/"]
 
   - id: C6-ratenfalle
     kategorie: preise
-    frage: "Stimmt es, dass die komplette DHI 2.0 Ausbildung nur 239,60 € kostet?"
+    frage: "Stimmt es, dass die komplette DHI 2.0 Ausbildung nur 359,60 € kostet?"
     soll: >
-      Stellt richtig: 239,60 € betrifft nur die Live-Online-Theorie (laut
-      Buchungsseite „in 4 Monatsraten beglichen") — die separat gebuchten
-      Übungstage kommen dazu. Keine selbst errechneten Gesamtsummen oder
-      Ratenbeträge („à etwa …"); freundlich, ohne den Nutzer bloßzustellen;
-      Buchungsseite verlinken. (Offener Punkt fürs Institut: ob 239,60 €
-      Monatsrate oder in Raten gezahlter Gesamtbetrag ist, sollte Ben mit dem
-      DHI klären — der Bot zitiert bis dahin nur wörtlich.)
+      Stellt richtig: 359,60 € ist die Monatsrate bei 10 Raten, der
+      Gesamtpreis für Stufe 1+2 beträgt 3.596 €. Freundlich, ohne den Nutzer
+      bloßzustellen; Link.
     checks:
-      must_any: ["übungstage"]
-      if_mentions: { trigger: "239,60", then_must_any: ["rate", "monatsrate", "beglichen", "theorie"] }
-      must_not: ["à etwa", "gesamtinvestition", "1\\.43[56]", "(zusammen|insgesamt|gesamt\\w*)[^.]{0,40}(knapp|rund|etwa|ca\\.?)\\s*\\**\\d"]
-      link_any: ["dhi2.de"]
-
+      must_any: ["3\\.596"]
+      if_mentions: { trigger: "359,60", then_must_any: ["rate", "monatsrate"] }
+      must_not: ["à etwa", "(zusammen|insgesamt|gesamt\\w*)[^.]{0,40}(knapp|rund|etwa|ca\\.?)\\s*\\**\\d"]
+      link_any: ["/seminare/"]
   - id: C7-restplaetze
     kategorie: buchung
     frage: "Sind für den Septembertermin noch Plätze frei?"
@@ -281,35 +269,30 @@ faelle:
       verweisen (dort stehen Verfügbarkeiten) und/oder schnelle Buchung bzw.
       persönliche Nachfrage empfehlen.
     checks:
-      link_any: ["dhi2.de", "seminarkalender", "wa.me", "kontakt"]
+      link_any: ["/seminare/", "wa.me", "kontakt"]
 
   - id: C8-preis-stufe3
     kategorie: preise
     frage: "Was kostet die Stufe 3?"
     soll: >
-      Beträge nur wörtlich mit Beschriftung aus den PREISDATEN (Vollpräsenz
-      und/oder Hybrid). Wird ein Preis genannt, MUSS die zugehörige
-      Buchungsseite verlinkt sein — der Seminarkalender allein genügt dann
-      nicht (Regel 6, Befund aus QS-Lauf 01.08.). Keine selbst errechneten
-      Beträge.
+      Beträge nur wörtlich mit Beschriftung aus den PREISDATEN (3.596 € in
+      allen Formaten, plus Rabatte). Mit Link auf Termin- oder Buchungsseite.
+      Keine selbst errechneten Beträge.
     checks:
       must_any: ["stufe 3", "masterclass", "experten"]
-      link_any: ["dhi2.de"]
+      link_any: ["/seminare/"]
       must_not: ["à etwa", "(zusammen|insgesamt|gesamt\\w*)[^.]{0,40}(knapp|rund|etwa|ca\\.?)\\s*\\**\\d"]
 
   - id: C9-hybrid-gesamtkosten-falle
     kategorie: preise
     frage: "Was kostet DHI 2.0 Stufe 1+2 mit den Übungstagen zusammen insgesamt?"
     soll: >
-      Explizite Aufforderung zum Addieren — der Bot darf trotzdem KEINE
-      Gesamtsumme selbst errechnen (Regel 6): beide Bestandteile getrennt
-      nennen (Live-Online-Theorie + separat gebuchte Übungstage), wörtliche
-      Beträge mit Beschriftung, Buchungsseite(n) verlinken.
+      Die Übungstage gehören zum Angebot: 3.596 € insgesamt, nichts
+      dazuaddieren. Alte Teilpreise (2.396 €, 1.196 €) dürfen nicht fallen.
     checks:
-      must_any: ["übungstage"]
-      must_not: ["à etwa", "1\\.43[56]", "(zusammen|insgesamt|gesamt\\w*)[^.]{0,40}(knapp|rund|etwa|ca\\.?)\\s*\\**\\d"]
-      link_any: ["dhi2.de"]
-
+      must_any: ["3\\.596"]
+      must_not: ["à etwa", "2\\.396", "1\\.196", "1\\.496"]
+      link_any: ["/seminare/"]
   # ── D · Kontakt & Beratung ─────────────────────────────────────────────────
 
   - id: D1-persoenliche-beratung
@@ -590,70 +573,62 @@ faelle:
       must_not: ["heilt garantiert"]
 
   # ── H · Rückmeldungen aus dem Live-Betrieb (01.08.2026) ────────────────────
-  # Aus der Fehlerliste des Instituts: falsche Übungstage-Preise je Standort,
-  # fehlender Button zur Terminseite, Berlin als vermeintlicher
-  # Ausbildungsstandort, fehlendes Beratungsangebot bei Skepsis, Auskunft zu
+  # Aus der Fehlerliste des Instituts: Preise samt Rabatten (H1–H3, neu
+  # 15.11.2026; ersetzt die alten Standortpreis-Fälle), fehlender Button zur
+  # Terminseite, Berlin als vermeintlicher Ausbildungsstandort, fehlendes Beratungsangebot bei Skepsis, Auskunft zu
   # Katrin Winkelmann, Rückfrage bei unklarem Anliegen.
 
-  - id: H1-uebungstage-preis-leipzig
+  - id: H1-preis-vorausgebildet
+    kategorie: preise
+    frage: "Ich habe Stufe 1+2 schon beim DHI gemacht. Was kostet Stufe 3 für mich?"
+    soll: >
+      Nennt den Preis mit 11 % Vorausgebildeten-Rabatt (3.200,44 €) und den
+      zusätzlichen Skonto-Preis bei Zahlung in 7 Tagen (2.880,40 €), mit Link.
+    checks:
+      must_any: ["3\\.200"]
+      must_any_2: ["2\\.880", "skonto", "10 ?%"]
+      link_any: ["/seminare/"]
+  - id: H2-uebungstage-ohne-eigenen-preis
     kategorie: preise
     frage: "Was kosten die Übungstage in Leipzig?"
     soll: >
-      Nennt den Leipziger Preis (1.496,00 €), nicht den Aschaffenburger
-      Basispreis der Produktseite (1.196,00 €), mit Standortangabe und
-      Buchungslink. Der Preis eines Standorts darf nie auf einen anderen
-      übertragen werden.
+      Die Übungstage haben keinen eigenen Preis mehr: sie gehören zur DHI 2.0
+      (3.596 € für Stufe 1+2). Alte Standortpreise (1.496 €, 1.196 €) dürfen
+      nicht fallen.
     checks:
-      must_any: ["1\\.496"]
-      must_all: ["leipzig"]
-      if_mentions: { trigger: "1\\.196", then_must_any: ["aschaffenburg"] }
-      link_any: ["dhi2.de"]
-
-  - id: H2-uebungstage-preis-aschaffenburg
+      must_any: ["3\\.596", "enthalten", "inklusive", "gehören", "bestandteil"]
+      must_not: ["1\\.496", "1\\.196"]
+      link_any: ["/seminare/"]
+  - id: H3-preis-komplettausbildung
     kategorie: preise
-    frage: "Was kosten die Übungstage in Aschaffenburg?"
+    frage: "Was kostet die Komplettausbildung Stufe 1 bis 3?"
     soll: >
-      Nennt 1.196,00 € für Aschaffenburg. Erwähnt er 1.496,00 €, muss klar
-      werden, dass dieser Preis für Leipzig oder Stuttgart gilt.
+      Nennt das Paket Stufe 1+2+3: 6.500 € (mit den Rabatten), Link.
     checks:
-      must_any: ["1\\.196"]
-      must_all: ["aschaffenburg"]
-      if_mentions: { trigger: "1\\.496", then_must_any: ["leipzig", "stuttgart"] }
-      link_any: ["dhi2.de"]
-
-  - id: H3-uebungstage-preis-ohne-ort
-    kategorie: preise
-    frage: "Was kosten die Präsenz-Übungstage?"
-    soll: >
-      Ohne genannten Standort entweder alle Standortpreise mit Ort nennen oder
-      nach dem Wunsch-Standort fragen — niemals einen einzelnen Betrag als
-      „den" Preis der Übungstage.
-    checks:
-      must_any: ["standort", "aschaffenburg", "leipzig", "stuttgart", "welche stadt", "wo "]
-      link_any: ["dhi2.de", "seminarkalender"]
-
+      must_any: ["6\\.500"]
+      link_any: ["/seminare/"]
   - id: H4-terminantwort-hat-kalenderbutton
     kategorie: termine
-    frage: "Wann sind die nächsten Übungstage in Stuttgart?"
+    frage: "Wann sind die nächsten Übungstage in Leipzig?"
     soll: >
       Terminantwort mit dem frühesten passenden Termin und am Ende ein Link
       auf die Terminseite (Seminarkalender), zusätzlich zum Buchungslink.
     checks:
-      next_termin: { kind: practice, location: Stuttgart, top: 3 }
-      link_any: ["seminarkalender"]
+      next_termin: { kind: hybrid, location: Leipzig, top: 3 }
+      link_any: ["/seminare/"]
 
   - id: H5-berlin-kein-ausbildungsstandort
     kategorie: termine
     frage: "Kann ich die Hypnoseausbildung auch in Berlin machen?"
     soll: >
       Sagt klar, dass Berlin kein Ausbildungsstandort ist (dort gibt es nur
-      eine DHI-Hypnosepraxis), und nennt sofort die Alternative: Live-Online-
-      Theorie plus Übungstage in Leipzig, Stuttgart oder Aschaffenburg.
+      eine DHI-Hypnosepraxis), und nennt sofort die Alternative: komplett
+      online (DHI 3.0) oder ein anderer Standort (z.B. Leipzig, Hamburg).
       Leitet aus Kundenstimmen keinen Standort ab.
     checks:
       must_all: ["berlin"]
       must_any: ["nicht", "kein"]
-      must_any_2: ["leipzig", "stuttgart", "aschaffenburg", "online"]
+      must_any_2: ["leipzig", "stuttgart", "aschaffenburg", "hamburg", "online"]
       must_not: ["ausbildung in berlin (findet|startet)", "in berlin bilden wir aus"]
 
   - id: H6-skepsis-beratung-anbieten
@@ -711,6 +686,6 @@ faelle:
       Hier ist der Bezug eindeutig: direkt antworten (Preis + Buchungslink),
       KEINE Rückfrage nach Ausbildung oder Praxis.
     checks:
-      must_any: ["3\\.596", "3596", "239,60", "1\\.196", "1\\.496"]
-      link_any: ["dhi2.de"]
+      must_any: ["3\\.596", "3596"]
+      link_any: ["/seminare/"]
       must_not: ["suchen sie eine ausbildung", "oder möchten sie hypnose für sich selbst"]

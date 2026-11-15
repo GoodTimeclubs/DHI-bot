@@ -53,9 +53,9 @@ Serverseitig wird nichts gespeichert.
 
 ```json
 {
-  "reply": "Die nächste Vollpräsenz-Ausbildung Stufe 1+2 startet am 21.09.2026 in Aschaffenburg: [Jetzt Termin sichern](https://dhi2.de/…) Welcher Weg passt besser zu Ihnen?",
+  "reply": "Die nächste Vollpräsenz-Ausbildung Stufe 1+2 startet am 21.09.2026 in Aschaffenburg: [Jetzt Termin sichern](https://deutsches-hypnoseinstitut.de/seminare/2/) Welcher Weg passt besser zu Ihnen?",
   "sources": [
-    { "url": "https://deutsches-hypnoseinstitut.de/seminarkalender.html", "title": "Seminarkalender" }
+    { "url": "https://deutsches-hypnoseinstitut.de/seminare/2/", "title": "11.01.2027 · DHI 1.0 · Vollpräsenz · Stufe 1+2" }
   ],
   "mock": false
 }
@@ -135,7 +135,7 @@ Status- und Monitoring-Endpunkt (z.B. für UptimeRobot).
 | `messages_today` | heute gezählte Chat-Nachrichten (RAM-Zähler, Neustart setzt zurück) |
 | `daily_limit` | konfiguriertes Tageslimit (`0` = deaktiviert) |
 | `index_built_at` / `chunks` | Stand und Größe des Suchindex |
-| `termine` / `termine_fetched_at` | Anzahl und Stand der Termindaten aus dem Seminarkalender |
+| `termine` / `termine_fetched_at` | Anzahl und Stand der Termindaten aus dem Shop (/seminare/) |
 
 ---
 
@@ -172,28 +172,31 @@ Token als Secret `QS_TEST_TOKEN`. Details: [docs/ci-cd.md](docs/ci-cd.md).
 ## GET /api/termine
 
 Liefert `data/termine.json` unverändert aus — also genau die Termine, aus denen
-der Bot gerade antwortet. Inhalt: die aus `assets/js/dhi-seminarkalender.js`
-geparsten Seminare, die `PRODUCT`-Map mit den Ablefy-Buchungslinks, die
-Quell-URL und der Zeitpunkt des letzten Crawls.
+der Bot gerade antwortet. Inhalt: die aus dem Shop `/seminare/` geparsten
+Angebote mit Orten, Buchbarkeit und Preisen je Zahlweise, die Quell-URL und der
+Zeitpunkt des letzten Crawls.
 
 ```json
 {
   "seminars": [
     {
-      "id": "…", "kind": "presence", "stage": "1+2",
-      "title": "DHI 1.0 Hypnose-Grundausbildung",
-      "start": "2026-09-18", "end": "2026-09-20",
-      "time": "10:00–18:00", "location": "Aschaffenburg",
-      "url": "https://dhi2.de/s/d-hi/…"
+      "id": "2", "kind": "presence", "stage": "1+2",
+      "title": "11.01.2027 · DHI 1.0 · Vollpräsenz · Hypnoseausbildung · Stufe 1+2 · 5 Tage · Aschaffenburg",
+      "start": "2027-01-11", "end": "2027-01-15",
+      "location": "Aschaffenburg", "orte": ["Aschaffenburg"], "buchbar": true,
+      "url": "https://deutsches-hypnoseinstitut.de/seminare/2/",
+      "preise": {
+        "regulaer": { "regular": { "gesamt": "3.596,00 €", "raten": "", "label": "Regelpreis, ohne Finanzvorteil" }, "…": {} },
+        "vorausgebildet": { "regular": { "gesamt": "3.200,44 €", "raten": "", "label": "Regelpreis, ohne Finanzvorteil" }, "…": {} }
+      }
     }
   ],
-  "products": { "presence12": "https://dhi2.de/s/d-hi/…" },
-  "js_url": "https://deutsches-hypnoseinstitut.de/assets/js/dhi-seminarkalender.js?v=20260727a",
-  "fetched_at": "2026-08-01T03:10:04+00:00"
+  "quelle": "https://deutsches-hypnoseinstitut.de/seminare/",
+  "fetched_at": "2026-11-16T03:10:04+00:00"
 }
 ```
 
-Ohne Auth, weil die Daten öffentlich sind: Sie stehen so im Seminarkalender der
+Ohne Auth, weil die Daten öffentlich sind: Sie stehen so im Shop der
 Website und stecken ohnehin in jeder Terminantwort des Bots. Solange noch keine
 Daten geladen sind, antwortet der Endpunkt mit `503`.
 

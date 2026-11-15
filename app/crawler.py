@@ -5,15 +5,12 @@ Erfasst:
      Subdomains; per Sitemap, Fallback: Link-Crawl). Hoster-Platzhalterseiten
      noch unbefüllter Subdomains (z.B. legal.… bis zum Einstellen der neuen
      AGB) werden erkannt und übersprungen.
-  2. Die Termindaten aus assets/js/dhi-seminarkalender.js (strukturiert)
-  3. Die Ablefy-Buchungsseiten auf dhi2.de (Preise, Raten, Restplätze)
-  4. Die zugehörigen Checkout-Seiten (Produkt-URL + "/payment") — nur dort
-     stehen die standortabhängigen Preise der Übungstage.
+  2. Termine und Preise aller Angebote aus dem Website-Shop /seminare/
+     (eingebettetes JSON, strukturiert; siehe parse_shop_html)
 
 Ergebnis in DATA_DIR:
   pages.json    – [{url, title, text, source, fetched_at}]
-  termine.json  – {seminars: [...], products: {...}, preisvarianten: {...},
-                   notes: [...], js_url, fetched_at}
+  termine.json  – {seminars: [... inkl. preise ...], quelle, fetched_at}
   meta.json     – Crawl-Statistik
 
 Aufruf:  python -m app.crawler [--from-fixtures]
@@ -39,10 +36,9 @@ from .config import (
     MAIN_DOMAIN,
     MAX_PAGES,
     REQUEST_DELAY,
-    UEBUNGSTAGE_PREISE_FALLBACK,
 )
 
-KALENDER_PAGE = f"https://{MAIN_DOMAIN}/seminarkalender.html"
+SHOP_URL = f"https://{MAIN_DOMAIN}/seminare/"
 HEADERS = {"User-Agent": "DHI-Bot/0.3 (Website-Assistent, Testbetrieb)"}
 
 SKIP_PATTERNS = [
@@ -158,187 +154,105 @@ def extract_page(url: str, html: str) -> tuple[dict, list[str]]:
     return {"url": url, "title": title, "text": text}, links
 
 
-# ── Seminarkalender-JS ───────────────────────────────────────────────────────
+# ── Termine & Preise aus dem Website-Shop (/seminare/) ───────────────────────
+# Seit November 2026 verkauft das DHI nur noch über die eigene Website (Ablefy
+# ist gekündigt, seminarkalender.html leitet in den Checkout um). Die Seite
+# /seminare/ bettet alle Angebote als JSON ein (<script type="application/json"
+# id="dhi-public-data…">): Termine, Orte, Buchungslink und die Preise für jede
+# Zahlweise, auch für DHI-Vorausgebildete. Das ist die einzige Quelle für
+# Termine und Preise — der Bot rechnet nie selbst.
 
-def _bracket_block(s: str, start: int, open_ch: str, close_ch: str) -> str:
-    depth = 0
-    for i in range(start, len(s)):
-        if s[i] == open_ch:
-            depth += 1
-        elif s[i] == close_ch:
-            depth -= 1
-            if depth == 0:
-                return s[start : i + 1]
-    return ""
-
-
-def parse_kalender_js(js: str) -> dict:
-    """Parst PRODUCT-Map, seminars-Array und notes aus dhi-seminarkalender.js."""
-    products: dict[str, str] = {}
-    m = re.search(r"PRODUCT\s*=\s*\{", js)
-    if m:
-        block = _bracket_block(js, m.end() - 1, "{", "}")
-        for k, v in re.findall(r"(\w+)\s*:\s*[\"']([^\"']+)[\"']", block):
-            products[k] = v
-
-    seminars: list[dict] = []
-    m = re.search(r"seminars\s*=\s*\[", js)
-    if m:
-        block = _bracket_block(js, m.end() - 1, "[", "]")
-        for entry in re.finditer(r"\{[^{}]*\}", block):
-            body = entry.group(0)
-            item: dict = {}
-            for key in ("id", "kind", "stage", "title", "start", "end", "time", "location"):
-                km = re.search(rf"\b{key}\s*:\s*[\"']([^\"']*)[\"']", body)
-                if km:
-                    item[key] = km.group(1)
-            um = re.search(r"\burl\s*:\s*(?:PRODUCT\.(\w+)|[\"']([^\"']+)[\"'])", body)
-            if um:
-                item["url"] = products.get(um.group(1), "") if um.group(1) else um.group(2)
-                if um.group(1):
-                    item["product_key"] = um.group(1)
-            if item.get("start"):
-                seminars.append(item)
-
-    notes: list[str] = []
-    m = re.search(r"notes\s*=\s*\[", js)
-    if m:
-        block = _bracket_block(js, m.end() - 1, "[", "]")
-        notes = [s for s in re.findall(r"[\"']([^\"']{10,})[\"']", block)]
-
-    seminars.sort(key=lambda x: x.get("start", ""))
-    return {"products": products, "seminars": seminars, "notes": notes}
+_SHOP_DATA = re.compile(
+    r'<script[^>]*\bid="dhi-public-data\d*"[^>]*>(.*?)</script>', re.S
+)
+# Die Shop-Software hängt Versionsnummern an Schlüssel („title223",
+# „payment_options252"); die wechseln mit jedem Update und werden abgeschnitten.
+_KEY_VERSION = re.compile(r"(?<=[a-z])\d+$")
+# Zahlweisen in fester Reihenfolge, so wie der Shop sie anbietet
+ZAHLWEISEN = ("regular", "instant", "rate4", "rate10")
 
 
-# ── Standortabhängige Preise (Checkout-Seiten) ───────────────────────────────
-# Die Ablefy-Produktseite zeigt nur einen Basispreis. Die echten Preise je
-# Standort stehen erst im Checkout (Produkt-URL + "/payment"), wo jedes
-# Standort-Ticket einzeln gelistet ist ("Leipzig - 2 Übungstage … 1.496,00€").
-# Ohne diese Daten nannte der Bot für Leipzig/Stuttgart den Aschaffenburger
-# Preis (Befund 01.08.2026).
-
-CHECKOUT_SUFFIX = "/payment"
-_BETRAG = re.compile(r"\b\d{1,3}(?:\.\d{3})*,\d{2}\s*€")
-# Zeilen, die zwar einen Ortsnamen enthalten, aber keine Ticket-Überschrift sind
-_ORT_RAUSCHEN = re.compile(r"europe/|zeitzone|timezone", re.I)
+def euro(cents: int) -> str:
+    """359600 → „3.596,00 €" (deutsche Schreibweise wie auf der Website)."""
+    return f"{cents / 100:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def _betrag(text: str) -> str:
-    """„1.496,00€" → „1.496,00 €" (einheitliche Schreibweise für den Prompt)."""
-    return re.sub(r"\s*€", " €", text.strip())
+def _ohne_version(d: dict) -> dict:
+    return {_KEY_VERSION.sub("", k): v for k, v in d.items()}
 
 
-def parse_checkout_varianten(
-    text: str, locations: set[str] | list[str]
-) -> dict[str, str]:
-    """Ordnet jedem Standort seinen Ticketpreis aus dem Checkout-Text zu.
-
-    Blockweise statt über ein Zeilenfenster: Jede Zeile mit einem Ortsnamen
-    eröffnet den Block dieses Standorts, der bis zur nächsten Zeile mit einem
-    ANDEREN Ortsnamen reicht. Innerhalb des Blocks zählt der erste Betrag (bei
-    Ablefy steht der Einmalpreis vor einer eventuellen Ratenangabe).
-
-    Das ist bewusst streng: Beträge vor dem ersten Ticket (Basispreis im
-    Seitenkopf, Zwischensummen) fallen heraus, und ein Block ohne Betrag bleibt
-    leer, statt sich den Preis des Nachbarblocks zu greifen. Fehlt am Ende ein
-    Standort, verwirft fetch_preisvarianten das Ergebnis komplett und nimmt die
-    gepflegte Tabelle — eine falsche Zuordnung wäre schlimmer als gar keine.
-
-    Rauschen wie „Europe/Berlin" wird ignoriert.
-    """
-    # Längste Ortsnamen zuerst und stabile Reihenfolge: „Oberstaufen-Steibis"
-    # darf nicht von einem kürzeren Teiltreffer verdrängt werden, und das
-    # Ergebnis darf nicht von der Set-Iterationsreihenfolge abhängen.
-    orte = sorted(
-        {o for o in locations if o and o.lower() != "live-online"},
-        key=lambda o: (-len(o), o),
-    )
-    treffer: dict[str, str] = {}
-    aktueller_ort: str | None = None
-
-    for zeile in (z.strip() for z in (text or "").splitlines()):
-        if not zeile:
+def _zahlweisen(opts: dict | None) -> dict:
+    """Shop-Zahlweisen → {zahlweise: {gesamt, raten, label}} mit Euro-Strings."""
+    out = {}
+    for key in ZAHLWEISEN:
+        o = (opts or {}).get(key)
+        if not o or not o.get("total_cents"):
             continue
-        if not _ORT_RAUSCHEN.search(zeile):
-            gefunden = next((o for o in orte if o.lower() in zeile.lower()), None)
-            if gefunden:
-                aktueller_ort = gefunden
-        if aktueller_ort and aktueller_ort not in treffer:
-            m = _BETRAG.search(zeile)
-            if m:
-                treffer[aktueller_ort] = _betrag(m.group(0))
-    return treffer
-
-
-def fetch_preisvarianten(
-    client: httpx.Client, products: dict[str, str], seminars: list[dict]
-) -> dict[str, dict[str, str]]:
-    """Standortpreise für alle Produkte holen, die an mehreren Orten stattfinden.
-
-    Übernommen wird das Ergebnis nur, wenn der Checkout JEDEN Standort abdeckt,
-    an dem das Produkt laut Seminarkalender stattfindet — sonst wäre eine
-    Teilzuordnung schlimmer als keine. Fehlt etwas, greift die gepflegte
-    Tabelle aus config.UEBUNGSTAGE_PREISE_FALLBACK.
-    """
-    out: dict[str, dict[str, str]] = {}
-    for key, purl in (products or {}).items():
-        soll = {
-            s.get("location", "") for s in seminars
-            if s.get("product_key") == key
-            and s.get("location") and s["location"].lower() != "live-online"
+        out[key] = {
+            "gesamt": euro(o["total_cents"]),
+            "raten": _raten_text(o.get("rates") or []),
+            "label": o.get("label", "").replace(" · ", ", "),
         }
-        if len(soll) < 2:
-            continue  # nur ein Standort → Basispreis der Produktseite genügt
-        varianten: dict[str, str] = {}
-        try:
-            r = _get(client, purl.rstrip("/") + CHECKOUT_SUFFIX)
-            time.sleep(REQUEST_DELAY)
-            if r is not None and "text/html" in r.headers.get("content-type", "text/html"):
-                page, _ = extract_page(purl, r.text)
-                # Nur die Standorte dieses Produkts: eine Adress- oder
-                # Impressumszeile mit einem fremden Ort soll keinen Betrag greifen.
-                varianten = parse_checkout_varianten(page["text"], soll)
-        except Exception as e:  # noqa: BLE001
-            # Der Crawl läuft nachts unbeaufsichtigt: eine kaputte Fremdseite
-            # darf niemals den kompletten Lauf (und damit den Index) kosten.
-            print(f"  ! [Preise/{key}] Checkout nicht auswertbar ({type(e).__name__}: {e})")
-        if soll.issubset(varianten):
-            out[key] = {ort: varianten[ort] for ort in sorted(soll)}
-            print(f"  ✓ [Preise/{key}] " + ", ".join(f"{o}: {p}" for o, p in out[key].items()))
-            # Abweichung zur gepflegten Tabelle sichtbar machen: entweder hat
-            # sich ein Preis geändert (dann config nachziehen) oder der Parser
-            # liegt daneben (dann fällt es hier auf, nicht erst im Chat).
-            fallback = UEBUNGSTAGE_PREISE_FALLBACK.get(key) or {}
-            abweichung = {o: p for o, p in out[key].items() if fallback.get(o, p) != p}
-            if abweichung:
-                print(f"  ! [Preise/{key}] weicht von config.UEBUNGSTAGE_PREISE_FALLBACK ab: "
-                      f"{abweichung} (dort steht {', '.join(f'{o}: {fallback[o]}' for o in abweichung)})")
-            continue
-        fallback = UEBUNGSTAGE_PREISE_FALLBACK.get(key)
-        if fallback and soll.issubset(fallback):
-            out[key] = {ort: fallback[ort] for ort in sorted(soll)}
-            print(f"  ~ [Preise/{key}] Checkout unvollständig — feste Tabelle aus config genutzt")
-        else:
-            print(f"  ! [Preise/{key}] keine Standortpreise ermittelbar (fehlend: "
-                  f"{sorted(soll - set(varianten))})")
     return out
 
 
-def fetch_kalender(client: httpx.Client) -> dict:
-    """Lädt seminarkalender.html, findet die aktuelle JS-URL und parst sie."""
-    r = _get(client, KALENDER_PAGE)
-    if r is None:
-        return {}
-    m = re.search(r"[\"']([^\"']*dhi-seminarkalender\.js[^\"']*)[\"']", r.text)
+def _raten_text(raten: list[int]) -> str:
+    """[85405]*4 → „4 Raten à 854,05 €"; Rundungsrest in Rate 1 wird benannt."""
+    if len(raten) < 2:
+        return ""
+    if len(set(raten)) == 1:
+        return f"{len(raten)} Raten à {euro(raten[0])}"
+    if len(set(raten[1:])) == 1:
+        return f"{len(raten)} Raten (1. Rate {euro(raten[0])}, danach je {euro(raten[1])})"
+    return f"{len(raten)} Raten: " + ", ".join(euro(r) for r in raten)
+
+
+def parse_shop_html(html: str) -> dict:
+    """Liest die eingebetteten Angebote aus /seminare/ → {seminars: [...]}.
+
+    Jedes Angebot wird ein Termin-Eintrag im bisherigen Format (id, kind,
+    stage, title, start, end, location, url) — plus „orte" (alle Orte des
+    Angebots), „buchbar" und „preise". kind ist der Shop-Modus: presence
+    (DHI 1.0 Vollpräsenz), hybrid (DHI 2.0 Live-Hybrid), online (DHI 3.0).
+    """
+    m = _SHOP_DATA.search(html or "")
     if not m:
-        print("  ! Kalender-Script nicht in seminarkalender.html gefunden")
-        return {}
-    js_url = urljoin(KALENDER_PAGE, m.group(1))
-    rj = _get(client, js_url)
-    if rj is None:
-        return {}
-    data = parse_kalender_js(rj.text)
-    data["js_url"] = js_url
+        return {"seminars": []}
+    seminars = []
+    for raw in json.loads(m.group(1)):
+        o = _ohne_version(raw)
+        if not o.get("starts_on") or not o.get("mode"):
+            continue
+        orte = list((o.get("locations") or {}).keys()) or ["Online"]
+        seminars.append({
+            "id": str(o.get("id", "")),
+            "kind": o["mode"],
+            "stage": o.get("sales_scope") or o.get("stage", ""),
+            "title": o.get("title", ""),
+            "start": o["starts_on"],
+            "end": o.get("ends_on") or o["starts_on"],
+            "location": " / ".join(orte),
+            "orte": orte,
+            "url": o.get("detail_url", ""),
+            "buchbar": bool(o.get("bookable", True)),
+            "preise": {
+                "regulaer": _zahlweisen(o.get("payment_options")),
+                "vorausgebildet": _zahlweisen(o.get("preeducated_options")),
+            },
+        })
+    seminars.sort(key=lambda s: (s["start"], s["id"]))
+    return {"seminars": seminars}
+
+
+def fetch_shop(client: httpx.Client) -> dict:
+    """Lädt /seminare/ und parst die eingebetteten Angebote."""
+    r = _get(client, SHOP_URL)
+    if r is None:
+        return {"seminars": []}
+    data = parse_shop_html(r.text)
+    if not data["seminars"]:
+        print("  ! Keine Angebotsdaten (dhi-public-data) in /seminare/ gefunden")
+    data["quelle"] = SHOP_URL
     return data
 
 
@@ -391,31 +305,13 @@ def crawl_pages(client: httpx.Client) -> tuple[list[dict], dict]:
         if rest:
             print(f"  ! Seitenlimit MAX_PAGES={MAX_PAGES} erreicht — {len(rest)} URLs nicht geholt")
 
-    kalender = fetch_kalender(client)
-    if kalender.get("seminars"):
-        print(f"Kalender: {len(kalender['seminars'])} Termine, {len(kalender.get('products', {}))} Produkte")
-
-    # Ablefy-Buchungsseiten (dhi2.de) mitcrawlen
-    for key, purl in (kalender.get("products") or {}).items():
-        r = _get(client, purl)
-        time.sleep(REQUEST_DELAY)
-        if r is None:
-            continue
-        page, _ = extract_page(purl, r.text)
-        page.update(source="buchungsseite", product_key=key, fetched_at=now)
-        pages.append(page)
-        print(f"  ✓ [Buchung/{key}] {purl}")
-
-    # Standortabhängige Preise aus den Checkout-Seiten (Übungstage)
     try:
-        kalender["preisvarianten"] = fetch_preisvarianten(
-            client, kalender.get("products") or {}, kalender.get("seminars") or []
-        )
+        kalender = fetch_shop(client)
     except Exception as e:  # noqa: BLE001
-        print(f"  ! Standortpreise übersprungen ({type(e).__name__}: {e}) — "
-              "es gilt die Tabelle aus config.UEBUNGSTAGE_PREISE_FALLBACK")
-        kalender["preisvarianten"] = {}
-
+        # Nächtlicher Lauf: ein Umbau der Shop-Seite darf nicht den Index kosten.
+        print(f"  ! Shop-Daten nicht auswertbar ({type(e).__name__}: {e})")
+        kalender = {"seminars": []}
+    print(f"Shop: {len(kalender['seminars'])} Angebote")
     kalender["fetched_at"] = now
     return pages, kalender
 
@@ -434,27 +330,15 @@ def load_fixtures() -> tuple[list[dict], dict]:
         lines = head.splitlines()
         url = lines[0].strip()
         title = lines[1].strip() if len(lines) > 1 else url
-        seite = {
+        pages.append({
             "url": url,
             "title": title,
             "text": body.strip(),
-            "source": "buchungsseite" if "dhi2.de" in url else "website",
+            "source": "website",
             "fetched_at": now,
-        }
-        # Dateiname „06-buchung-presence12.txt" trägt den Produktschlüssel —
-        # ohne ihn fände der PREISDATEN-Block offline keine Standortpreise.
-        km = re.match(r"\d+-buchung-(\w+)$", f.stem)
-        if km:
-            seite["product_key"] = km.group(1)
-        pages.append(seite)
-    js = (FIXTURES_DIR / "dhi-seminarkalender.js").read_text(encoding="utf-8")
-    kalender = parse_kalender_js(js)
-    kalender["js_url"] = "fixtures/dhi-seminarkalender.js"
-    # Offline gibt es keine Checkout-Seiten → gepflegte Tabelle als Quelle
-    kalender["preisvarianten"] = {
-        key: dict(preise) for key, preise in UEBUNGSTAGE_PREISE_FALLBACK.items()
-        if any(s.get("product_key") == key for s in kalender.get("seminars", []))
-    }
+        })
+    kalender = parse_shop_html((FIXTURES_DIR / "seminare.html").read_text(encoding="utf-8"))
+    kalender["quelle"] = "fixtures/seminare.html"
     kalender["fetched_at"] = now
     return pages, kalender
 
@@ -473,9 +357,13 @@ def run(from_fixtures: bool = False) -> dict:
     (DATA_DIR / "pages.json").write_text(
         json.dumps(pages, ensure_ascii=False, indent=1), encoding="utf-8"
     )
-    (DATA_DIR / "termine.json").write_text(
-        json.dumps(kalender, ensure_ascii=False, indent=1), encoding="utf-8"
-    )
+    termine_path = DATA_DIR / "termine.json"
+    if kalender.get("seminars") or not termine_path.exists():
+        termine_path.write_text(json.dumps(kalender, ensure_ascii=False, indent=1), encoding="utf-8")
+    else:
+        # Lieber gestrige Termine und Preise als gar keine: ohne sie fehlen dem
+        # Bot sämtliche Preisdaten.
+        print("  ! 0 Angebote — termine.json vom letzten erfolgreichen Lauf bleibt erhalten")
     pro_domain: dict[str, int] = {}
     for p in pages:
         host = urlparse(p["url"]).netloc

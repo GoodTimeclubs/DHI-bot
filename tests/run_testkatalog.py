@@ -127,8 +127,10 @@ def next_termine(termine: dict, spec: dict, today: str) -> list[dict]:
             want = spec.get(key)
             if want is None:
                 continue
-            optionen = [w.strip().lower() for w in str(want).split("|")]
-            if str(s.get(key, "")).lower() not in optionen:
+            optionen = {w.strip().lower() for w in str(want).split("|")}
+            # Ein Angebot kann mehrere Orte haben (DHI 2.0: Aschaffenburg + Leipzig)
+            werte = s.get("orte") if key == "location" and s.get("orte") else [s.get(key, "")]
+            if not optionen & {str(w).lower() for w in werte}:
                 ok = False
         if ok:
             res.append(s)

@@ -53,10 +53,6 @@ def build_index() -> dict:
                     "url": page["url"],
                     "title": page.get("title", page["url"]),
                     "source": page.get("source", "website"),
-                    # Ablefy-Produktschlüssel mitführen: llm.build_system kennzeichnet
-                    # damit Auszüge von Buchungsseiten mit standortabhängigen Preisen,
-                    # deren nackter Basispreis sonst als „der" Preis gelesen wird.
-                    "product_key": page.get("product_key", ""),
                     "text": part,
                 }
             )
