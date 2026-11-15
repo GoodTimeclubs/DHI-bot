@@ -98,11 +98,10 @@ KLARSTELLUNGEN = [
 ]
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-5-5")
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "700"))
-# Niedrige Temperature = konsistente, regelkonforme Beratung (QS-Befund:
-# bei Default 1.0 schwankten Länge, Links und Formatierung stark je Lauf).
-TEMPERATURE = float(os.getenv("TEMPERATURE", "0.3"))
+# Kein TEMPERATURE mehr: Seit API-Version 2026-10-21 (anthropic-SDK 2.x) lehnt die
+# API temperature/top_p/top_k bei jedem Modell ab (400).
 
 # Mock-Modus: ohne API-Key antwortet der Bot mit gefundenen Quellen statt LLM-Text
 MOCK_LLM = os.getenv("MOCK_LLM", "").lower() in ("1", "true", "yes") or not ANTHROPIC_API_KEY

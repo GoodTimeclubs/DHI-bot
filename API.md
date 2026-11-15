@@ -118,7 +118,7 @@ Status- und Monitoring-Endpunkt (z.B. für UptimeRobot).
 ```json
 {
   "status": "ok",
-  "model": "claude-haiku-4-5-20251001",
+  "model": "claude-haiku-5-5",
   "mock_mode": false,
   "messages_today": 42,
   "daily_limit": 1000,

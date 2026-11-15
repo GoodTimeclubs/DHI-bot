@@ -288,3 +288,41 @@ def test_deterministische_terminantworten_sind_gedankenstrichfrei(monkeypatch):
     assert out.get("deterministic") is True
     assert "—" not in out["reply"]
     assert "02.05.–03.05.2099" in out["reply"]          # Bis-Strich im Datum bleibt
+
+
+# ── Claude-Aufruf (Haiku 5.5, anthropic-SDK 2.x) ─────────────────────────────
+
+def _fake_anthropic(monkeypatch, content, stop_reason="end_turn"):
+    """Ersetzt den API-Client; merkt sich die Aufrufparameter."""
+    import types
+
+    import anthropic
+    aufrufe = []
+
+    class _Messages:
+        def create(self, **kw):
+            aufrufe.append(kw)
+            return types.SimpleNamespace(content=content, stop_reason=stop_reason)
+
+    monkeypatch.setattr(anthropic, "Anthropic", lambda **kw: types.SimpleNamespace(messages=_Messages()))
+    monkeypatch.setattr(llm, "MOCK_LLM", False)
+    monkeypatch.setattr(llm, "DETERMINISTIC_TERMINE", False)
+    monkeypatch.setattr(llm.retrieval, "search", lambda q, k=6: [])
+    return aufrufe
+
+
+def test_aufruf_ohne_temperature_und_ohne_thinking(monkeypatch):
+    """Seit API-Version 2026-10-21 führt temperature zu einem 400 (Live-Ausfall
+    am 15.11.2026: „Antwort derzeit nicht möglich")."""
+    import types
+    aufrufe = _fake_anthropic(monkeypatch, [types.SimpleNamespace(type="text", text="Gern.")])
+    assert llm.answer("Was kostet Stufe 3?", [])["reply"] == "Gern."
+    assert "temperature" not in aufrufe[0]
+    assert aufrufe[0]["thinking"] == {"type": "disabled"}
+
+
+def test_abgelehnte_anfrage_zeigt_kontaktweg_statt_leerer_blase(monkeypatch):
+    aufrufe = _fake_anthropic(monkeypatch, [], stop_reason="refusal")
+    out = llm.answer("Testfrage?", [])
+    assert aufrufe and out["reply"]
+    assert "Beratung per WhatsApp" in out["reply"]

@@ -133,7 +133,7 @@ damit dort nachgefragt statt geraten wird.
 ## Wichtige Einstellungen (`.env`)
 
 - `ANTHROPIC_API_KEY` — ohne Key: Mock-Modus
-- `ANTHROPIC_MODEL` — Standard: `claude-haiku-4-5-20251001` (günstig/schnell)
+- `ANTHROPIC_MODEL` — Standard: `claude-haiku-5-5` (günstig/schnell)
 - `CRAWL_ON_START` — `auto` (Standard) | `always` | `never`
 - `CRAWL_HOUR` — Stunde des täglichen Re-Crawls (Europe/Berlin)
 - `CRAWL_DOMAINS` — erfasste Domains, kommagetrennt (Standard: alle 11

@@ -16,7 +16,6 @@ from .config import (
     KLARSTELLUNGEN,
     MAX_TOKENS,
     MOCK_LLM,
-    TEMPERATURE,
     UEBUNGSSTANDORTE_AUF_ANFRAGE,
 )
 from .termine import SEMINARKALENDER_URL
@@ -297,9 +296,19 @@ def _answer(message: str, history: list[dict], api_key: str | None = None) -> di
     resp = client.messages.create(
         model=ANTHROPIC_MODEL,
         max_tokens=MAX_TOKENS,
-        temperature=TEMPERATURE,
+        # Kurze Beratungsantworten brauchen kein Nachdenken: hält die Antwortzeit
+        # niedrig und MAX_TOKENS ganz für den Antworttext frei.
+        thinking={"type": "disabled"},
         system=build_system(chunks),
         messages=msgs,
     )
     reply = "".join(b.text for b in resp.content if b.type == "text").strip()
+    if not reply:
+        # z.B. stop_reason "refusal" (Sicherheitsfilter): nie eine leere Blase zeigen
+        print(f"!! Leere Antwort (stop_reason={resp.stop_reason})")
+        reply = (
+            "Dazu kann ich Ihnen hier leider keine Auskunft geben. Das DHI-Team hilft "
+            f"Ihnen gern persönlich weiter: Telefon {CONTACT['telefon']} oder "
+            f"[Beratung per WhatsApp]({CONTACT['whatsapp_link']})."
+        )
     return {"reply": reply, "sources": sources[:4], "mock": False}
